@@ -31,7 +31,7 @@ export default function VoiceChat({ gameCode, username }: Props) {
         clientRef.current = client;
 
         // Track who is speaking
-        client.on("user-published", async (user: any, mediaType: string) => {
+        client.on("user-published", async (user: any, mediaType: "audio" | "video") => {
           await client.subscribe(user, mediaType);
           if (mediaType === "audio") {
             user.audioTrack?.play();
@@ -44,7 +44,7 @@ export default function VoiceChat({ gameCode, username }: Props) {
         });
 
         // uid = username for easy identification
-        await client.join(appId, gameCode, null, username);
+        await client.join(appId as string, gameCode, null, username);
 
         const micTrack = await AgoraRTC.createMicrophoneAudioTrack();
         localTrackRef.current = micTrack;
