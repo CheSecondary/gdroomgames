@@ -3,15 +3,16 @@ import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { useGameSocket } from "@/lib/useGameSocket";
+import WaitingRoom from "@/components/WaitingRoom";
 import GameBoard from "@/components/GameBoard";
 
 export default function GamePage() {
   const router = useRouter();
   const params = useParams();
-  const code = (params?.code as string ?? "").toUpperCase();
+  const code   = (params?.code as string ?? "").toUpperCase();
 
   const [username, setUsername] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
+  const [ready,    setReady]    = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("os_username");
@@ -27,12 +28,9 @@ export default function GamePage() {
     startGame, placeBid, playCard, endGame,
   } = useGameSocket(code, username ?? "");
 
+  // ── Loading states ────────────────────────────────────────────────────────
   if (!ready || !username) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-950">
-        <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
+    return <Spinner />;
   }
 
   if (error && !state) {
@@ -49,12 +47,25 @@ export default function GamePage() {
   if (!state) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-950 gap-3">
-        <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+        <Spinner />
         <p className="text-gray-500 text-sm">{connected ? "Loading game…" : "Connecting…"}</p>
       </div>
     );
   }
 
+  // ── Waiting room ─────────────────────────────────────────────────────────
+  if (state.status === "waiting") {
+    return (
+      <WaitingRoom
+        state={state}
+        username={username}
+        gameCode={code}
+        onStartGame={startGame}
+      />
+    );
+  }
+
+  // ── Active game ───────────────────────────────────────────────────────────
   return (
     <GameBoard
       state={state}
@@ -68,5 +79,13 @@ export default function GamePage() {
       onPlayCard={playCard}
       onEndGame={endGame}
     />
+  );
+}
+
+function Spinner() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gray-950">
+      <div className="w-8 h-8 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+    </div>
   );
 }

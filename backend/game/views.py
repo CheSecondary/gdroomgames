@@ -19,12 +19,25 @@ class CreateGameView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        username = request.data.get("username", "").strip()[:50]
-        num_decks = int(request.data.get("num_decks", 1))
+        username         = request.data.get("username", "").strip()[:50]
+        num_decks        = max(1, min(2, int(request.data.get("num_decks", 1))))
+        expected_players = max(2, min(7, int(request.data.get("expected_players", 4))))
+        teams_enabled    = bool(request.data.get("teams_enabled", False))
+
         if not username:
             return Response({"error": "Username required."}, status=400)
 
-        game = Game.objects.create(code=gen_code(), host_username=username, num_decks=num_decks)
+        # Teams only valid for even player counts ≥ 4
+        if expected_players < 4 or expected_players % 2 != 0:
+            teams_enabled = False
+
+        game = Game.objects.create(
+            code=gen_code(),
+            host_username=username,
+            num_decks=num_decks,
+            expected_players=expected_players,
+            teams_enabled=teams_enabled,
+        )
         Player.objects.create(game=game, username=username, seat=0)
         return Response(GameSerializer(game).data, status=status.HTTP_201_CREATED)
 
@@ -34,7 +47,7 @@ class JoinGameView(APIView):
 
     def post(self, request):
         username = request.data.get("username", "").strip()[:50]
-        code = request.data.get("code", "").upper()
+        code     = request.data.get("code", "").upper()
         if not username:
             return Response({"error": "Username required."}, status=400)
 
@@ -43,18 +56,17 @@ class JoinGameView(APIView):
         except Game.DoesNotExist:
             return Response({"error": "Game not found."}, status=404)
 
-        # Player already in this game — allow rejoin (handles page reload mid-game)
+        # Already in this game — allow rejoin at any game status (handles reload)
         if game.players.filter(username=username).exists():
             return Response(GameSerializer(game).data)
 
-        # New player joining — only allowed while waiting
         if game.status != Game.STATUS_WAITING:
             return Response({"error": "Game has already started."}, status=400)
 
         if game.players.count() >= 7:
             return Response({"error": "Room is full (max 7 players)."}, status=400)
 
-        # Handle name collision in the same room
+        # Handle name collision
         base, n = username, 2
         while game.players.filter(username=username).exists():
             username = f"{base}{n}"

@@ -6,13 +6,38 @@ from .models import Game, Player, Round, Trick, TrickCard
 from . import engine
 
 
-class GameConsumer(AsyncWebsocketConsumer):
-    async def connect(self):
-        self.game_code = self.scope["url_route"]["kwargs"]["game_code"]
-        self.room_group = f"game_{self.game_code}"
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
+def captain_seats(game) -> set[int]:
+    """Seats that are team captains (place the bid for their team)."""
+    return {t[0] for t in game.teams} if game.teams_enabled else set()
+
+
+def team_index_for_seat(game, seat: int) -> int:
+    for i, team in enumerate(game.teams):
+        if seat in team:
+            return i
+    return -1
+
+
+def find_next_idx(current: int, n: int, predicate) -> int:
+    """Walk clockwise from current+1 until predicate is True. Return -1 if none."""
+    for i in range(1, n + 1):
+        idx = (current + i) % n
+        if predicate(idx):
+            return idx
+    return -1
+
+
+# ── Consumer ──────────────────────────────────────────────────────────────────
+
+class GameConsumer(AsyncWebsocketConsumer):
+
+    async def connect(self):
+        self.game_code  = self.scope["url_route"]["kwargs"]["game_code"]
+        self.room_group = f"game_{self.game_code}"
         qs = parse_qs(self.scope.get("query_string", b"").decode())
-        self.username = (qs.get("username", ["Anonymous"])[0])[:50].strip() or "Anonymous"
+        self.username   = (qs.get("username", ["Anonymous"])[0])[:50].strip() or "Anonymous"
 
         await self.channel_layer.group_add(self.room_group, self.channel_name)
         await self.accept()
@@ -36,7 +61,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         if handler:
             await handler(data)
 
-    # ── Action handlers ───────────────────────────────────────────────────────
+    # ── Actions ───────────────────────────────────────────────────────────────
 
     async def handle_start_game(self, data):
         game = await self.get_game()
@@ -48,7 +73,14 @@ class GameConsumer(AsyncWebsocketConsumer):
             return
 
         max_r = engine.max_rounds(len(players), game.num_decks)
-        await self.db_start_game(game, max_r)
+
+        # Assign teams if enabled
+        teams = []
+        if game.teams_enabled and len(players) >= 4 and len(players) % 2 == 0:
+            seats = [p.seat for p in players]
+            teams = engine.assign_teams(seats)
+
+        await self.db_start_game(game, max_r, teams)
         await self.start_new_round(game)
 
     async def handle_place_bid(self, data):
@@ -65,6 +97,11 @@ class GameConsumer(AsyncWebsocketConsumer):
             return
 
         await self.db_set_bid(player, bid)
+
+        # In teams mode, copy the captain's bid to all teammates so everyone sees it
+        if game.teams_enabled:
+            await self.db_copy_bid_to_teammates(game, player)
+
         await self.advance_bid_turn(game)
 
     async def handle_play_card(self, data):
@@ -88,7 +125,6 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.advance_play_turn(game)
 
     async def handle_end_game(self, data):
-        """Host can end the game at any time (mid-session)."""
         game = await self.get_game()
         if game.host_username != self.username:
             await self.send_error("Only the host can end the game.")
@@ -98,46 +134,79 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.db_update_game(game, status=Game.STATUS_FINISHED)
         await self.broadcast_state()
 
-    # ── Game flow ─────────────────────────────────────────────────────────────
+    # ── Flow ──────────────────────────────────────────────────────────────────
 
     async def start_new_round(self, game):
-        game = await self.get_game()
+        game    = await self.get_game()
         players = await self.get_players(game)
-        trump = engine.pick_trump()
-        hands = engine.deal_cards(len(players), game.current_round, game.num_decks)
+        trump   = engine.pick_trump()
+        hands   = engine.deal_cards(len(players), game.current_round, game.num_decks)
 
         await self.db_create_round(game, trump, game.current_round)
         await self.db_deal_hands(players, hands)
         await self.db_reset_bids_and_tricks(players)
+
+        # Determine first bidder:
+        # solo → lead_player_index; teams → first captain clockwise from lead
+        if game.teams_enabled and game.teams:
+            caps  = captain_seats(game)
+            first = find_next_idx(
+                (game.lead_player_index - 1) % len(players),
+                len(players),
+                lambda i: players[i].seat in caps,
+            )
+            first_bid_idx = first if first != -1 else game.lead_player_index
+        else:
+            first_bid_idx = game.lead_player_index
+
         await self.db_update_game(
             game,
             status=Game.STATUS_BIDDING,
             trump_suit=trump,
-            current_player_index=game.lead_player_index,
+            current_player_index=first_bid_idx,
         )
         await self.broadcast_state()
 
     async def advance_bid_turn(self, game):
-        game = await self.get_game()
+        game    = await self.get_game()
         players = await self.get_players(game)
-        all_bid = all(p.bid >= 0 for p in players)
-        if all_bid:
-            await self.db_update_game(
-                game,
-                status=Game.STATUS_PLAYING,
-                current_player_index=game.lead_player_index,
+
+        if game.teams_enabled and game.teams:
+            caps = captain_seats(game)
+            # Find next captain who still needs to bid
+            next_idx = find_next_idx(
+                game.current_player_index,
+                len(players),
+                lambda i: players[i].seat in caps and players[i].bid < 0,
             )
-            await self.db_create_trick(game)
+            if next_idx == -1:
+                # All captains have bid → start playing
+                await self.db_update_game(
+                    game, status=Game.STATUS_PLAYING,
+                    current_player_index=game.lead_player_index,
+                )
+                await self.db_create_trick(game)
+            else:
+                await self.db_update_game(game, current_player_index=next_idx)
         else:
-            nxt = (game.current_player_index + 1) % len(players)
-            await self.db_update_game(game, current_player_index=nxt)
+            all_bid = all(p.bid >= 0 for p in players)
+            if all_bid:
+                await self.db_update_game(
+                    game, status=Game.STATUS_PLAYING,
+                    current_player_index=game.lead_player_index,
+                )
+                await self.db_create_trick(game)
+            else:
+                nxt = (game.current_player_index + 1) % len(players)
+                await self.db_update_game(game, current_player_index=nxt)
+
         await self.broadcast_state()
 
     async def advance_play_turn(self, game):
-        game = await self.get_game()
+        game    = await self.get_game()
         players = await self.get_players(game)
-        trick = await self.get_current_trick(game)
-        cards = await self.get_trick_cards(trick)
+        trick   = await self.get_current_trick(game)
+        cards   = await self.get_trick_cards(trick)
 
         if len(cards) < len(players):
             nxt = (game.current_player_index + 1) % len(players)
@@ -145,7 +214,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.broadcast_state()
             return
 
-        # All players have played — determine winner
+        # ── Trick complete ──
         trick_data = [
             {
                 "suit": c.suit, "rank": c.rank, "deck_id": c.deck_id,
@@ -154,39 +223,42 @@ class GameConsumer(AsyncWebsocketConsumer):
             }
             for c in cards
         ]
-        win_idx = engine.determine_winner(trick_data, trick.lead_suit, game.trump_suit)
+        win_idx      = engine.determine_winner(trick_data, trick.lead_suit, game.trump_suit)
         winning_seat = trick_data[win_idx]["player_index"]
-        winner = next(p for p in players if p.seat == winning_seat)
+        winner       = next(p for p in players if p.seat == winning_seat)
 
         await self.db_complete_trick(trick, winner)
 
-        fresh_players = await self.get_players(game)
-        has_cards = any(len(p.hand) > 0 for p in fresh_players)
-
-        if has_cards:
+        fresh = await self.get_players(game)
+        if any(len(p.hand) > 0 for p in fresh):
             await self.db_update_game(game, current_player_index=winning_seat)
             await self.db_create_trick(game)
             await self.broadcast_state()
         else:
-            await self.end_round(game, fresh_players)
+            await self.end_round(game, fresh)
 
     async def end_round(self, game, players):
-        players_data = [{"bid": p.bid, "tricks_won": p.tricks_won} for p in players]
-        deltas = engine.calculate_round_scores(players_data)
+        players_data = [{"seat": p.seat, "bid": p.bid, "tricks_won": p.tricks_won} for p in players]
 
-        # Broadcast the round summary BEFORE resetting bids/tricks
-        summary_scores = [
+        if game.teams_enabled and game.teams:
+            deltas = engine.calculate_team_round_scores(game.teams, players_data)
+        else:
+            deltas = engine.calculate_round_scores(players_data)
+
+        # Broadcast summary BEFORE resetting
+        summary = [
             {
                 "username": p.username,
-                "bid": p.bid,
+                "bid":        p.bid,
                 "tricks_won": p.tricks_won,
-                "delta": d,
+                "delta":      d,
+                "team_index": team_index_for_seat(game, p.seat),
             }
             for p, d in zip(players, deltas)
         ]
         await self.channel_layer.group_send(
             self.room_group,
-            {"type": "round_ended_msg", "scores": summary_scores, "round": game.current_round},
+            {"type": "round_ended_msg", "scores": summary, "round": game.current_round},
         )
 
         await self.db_apply_scores(players, deltas)
@@ -199,49 +271,44 @@ class GameConsumer(AsyncWebsocketConsumer):
             return
 
         new_lead = (game.lead_player_index + 1) % len(players)
-        new_round = game.current_round + 1
-        await self.db_update_game(game, current_round=new_round, lead_player_index=new_lead)
+        await self.db_update_game(
+            game,
+            current_round=game.current_round + 1,
+            lead_player_index=new_lead,
+        )
         await self.start_new_round(game)
 
     # ── Validation ────────────────────────────────────────────────────────────
 
     async def validate_card_play(self, game, player, card):
         hand = player.hand
-        card_in_hand = any(
+        in_hand = any(
             c["suit"] == card["suit"]
             and c["rank"] == card["rank"]
             and c["deck_id"] == card.get("deck_id", 1)
             for c in hand
         )
-        if not card_in_hand:
-            return False, "Card not in your hand."
+        if not in_hand:
+            return False, "That card isn't in your hand."
 
         trick = await self.get_current_trick(game)
         if not trick or not trick.lead_suit:
-            return True, ""
+            return True, ""   # first card — anything goes
 
         if card["suit"] == trick.lead_suit:
             return True, ""
 
-        has_lead = any(c["suit"] == trick.lead_suit for c in hand)
-        if has_lead:
-            return False, f"You have {trick.lead_suit} — must follow lead suit!"
+        if any(c["suit"] == trick.lead_suit for c in hand):
+            return False, f"You must follow the lead suit ({trick.lead_suit})."
 
         return True, ""
 
     # ── Broadcast ─────────────────────────────────────────────────────────────
 
     async def broadcast_state(self):
-        """
-        Build state from DB and broadcast to the whole room.
-        All players receive FULL hand data for everyone.
-        Frontend is responsible for showing only your own cards.
-        This is fine for a trusted friend group.
-        """
         state = await self.build_state()
         await self.channel_layer.group_send(
-            self.room_group,
-            {"type": "game_state", "state": state},
+            self.room_group, {"type": "game_state", "state": state}
         )
 
     async def game_state(self, event):
@@ -268,53 +335,67 @@ class GameConsumer(AsyncWebsocketConsumer):
 
         players = list(game.players.order_by("seat"))
 
-        current_trick_cards = []
+        # Current trick cards
+        trick_cards = []
         try:
             cur_round = game.rounds.filter(is_complete=False).order_by("-number").first()
             if cur_round:
                 cur_trick = cur_round.tricks.filter(is_complete=False).order_by("-number").first()
                 if cur_trick:
-                    current_trick_cards = [
+                    trick_cards = [
                         {
-                            "suit": tc.suit,
-                            "rank": tc.rank,
-                            "deck_id": tc.deck_id,
+                            "suit":        tc.suit,
+                            "rank":        tc.rank,
+                            "deck_id":     tc.deck_id,
                             "player_seat": tc.player.seat,
                             "player_name": tc.player.username,
-                            "play_order": tc.play_order,
+                            "play_order":  tc.play_order,
                         }
                         for tc in cur_trick.cards.select_related("player").order_by("play_order")
                     ]
         except Exception:
             pass
 
-        # Send FULL hand data to everyone — frontend hides other players' cards
+        # Enrich player state with team info
+        def player_team(p):
+            for i, team in enumerate(game.teams):
+                if p.seat in team:
+                    return i
+            return -1
+
+        caps = {t[0] for t in game.teams} if game.teams_enabled else set()
+
         players_state = [
             {
-                "seat": p.seat,
-                "username": p.username,
-                "bid": p.bid,
-                "tricks_won": p.tricks_won,
+                "seat":        p.seat,
+                "username":    p.username,
+                "bid":         p.bid,
+                "tricks_won":  p.tricks_won,
                 "total_score": p.total_score,
-                "hand_count": len(p.hand),
-                "hand": p.hand,               # ← full hand, no hiding server-side
+                "hand_count":  len(p.hand),
+                "hand":        p.hand,        # full hand — frontend filters
                 "is_connected": p.is_connected,
+                "team_index":   player_team(p),
+                "is_captain":   p.seat in caps,
             }
             for p in players
         ]
 
         return {
-            "game_code": game.code,
-            "host_username": game.host_username,
-            "status": game.status,
-            "current_round": game.current_round,
-            "max_rounds": game.max_rounds,
-            "trump_suit": game.trump_suit,
+            "game_code":      game.code,
+            "host_username":  game.host_username,
+            "status":         game.status,
+            "current_round":  game.current_round,
+            "max_rounds":     game.max_rounds,
+            "trump_suit":     game.trump_suit,
             "current_player_index": game.current_player_index,
-            "lead_player_index": game.lead_player_index,
-            "num_decks": game.num_decks,
-            "players": players_state,
-            "current_trick": current_trick_cards,
+            "lead_player_index":    game.lead_player_index,
+            "num_decks":      game.num_decks,
+            "expected_players": game.expected_players,
+            "teams_enabled":  game.teams_enabled,
+            "teams":          game.teams,          # [[captain_seat, teammate_seat], ...]
+            "players":        players_state,
+            "current_trick":  trick_cards,
         }
 
     # ── DB helpers ────────────────────────────────────────────────────────────
@@ -350,15 +431,16 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def set_player_connected(self, connected):
-        Player.objects.filter(game__code=self.game_code, username=self.username).update(
-            is_connected=connected
-        )
+        Player.objects.filter(
+            game__code=self.game_code, username=self.username
+        ).update(is_connected=connected)
 
     @database_sync_to_async
-    def db_start_game(self, game, max_r):
-        game.status = Game.STATUS_BIDDING
+    def db_start_game(self, game, max_r, teams):
+        game.status        = Game.STATUS_BIDDING
         game.current_round = 1
-        game.max_rounds = max_r
+        game.max_rounds    = max_r
+        game.teams         = teams
         game.save()
 
     @database_sync_to_async
@@ -370,7 +452,8 @@ class GameConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def db_create_round(self, game, trump, cards_per):
         return Round.objects.create(
-            game=game, number=game.current_round, trump_suit=trump, cards_per_player=cards_per
+            game=game, number=game.current_round,
+            trump_suit=trump, cards_per_player=cards_per,
         )
 
     @database_sync_to_async
@@ -382,7 +465,7 @@ class GameConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def db_reset_bids_and_tricks(self, players):
         for p in players:
-            p.bid = -1
+            p.bid        = -1
             p.tricks_won = 0
             p.save()
 
@@ -392,32 +475,38 @@ class GameConsumer(AsyncWebsocketConsumer):
         player.save()
 
     @database_sync_to_async
+    def db_copy_bid_to_teammates(self, game, captain):
+        """Copy captain's bid to all their teammates."""
+        for team in game.teams:
+            if captain.seat == team[0]:
+                Player.objects.filter(
+                    game=game, seat__in=team[1:]
+                ).update(bid=captain.bid)
+                break
+
+    @database_sync_to_async
     def db_create_trick(self, game):
         r = game.rounds.filter(is_complete=False).order_by("-number").first()
         return Trick.objects.create(round=r, number=r.tricks.count() + 1)
 
     @database_sync_to_async
     def db_play_card(self, game, player, card):
-        r = game.rounds.filter(is_complete=False).order_by("-number").first()
+        r     = game.rounds.filter(is_complete=False).order_by("-number").first()
         trick = r.tricks.filter(is_complete=False).order_by("-number").first()
-        play_order = trick.cards.count()
-        if play_order == 0:
+        order = trick.cards.count()
+        if order == 0:
             trick.lead_suit = card["suit"]
             trick.save()
         TrickCard.objects.create(
-            trick=trick,
-            player=player,
-            suit=card["suit"],
-            rank=card["rank"],
-            deck_id=card.get("deck_id", 1),
-            play_order=play_order,
+            trick=trick, player=player,
+            suit=card["suit"], rank=card["rank"],
+            deck_id=card.get("deck_id", 1), play_order=order,
         )
-        # Remove card from hand (match on all three fields for 2-deck safety)
         player.hand = [
             c for c in player.hand
             if not (
-                c["suit"] == card["suit"]
-                and c["rank"] == card["rank"]
+                c["suit"]    == card["suit"]
+                and c["rank"]    == card["rank"]
                 and c["deck_id"] == card.get("deck_id", 1)
             )
         ]
@@ -425,7 +514,7 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def db_complete_trick(self, trick, winner):
-        trick.winner = winner
+        trick.winner      = winner
         trick.is_complete = True
         trick.save()
         winner.tricks_won += 1
