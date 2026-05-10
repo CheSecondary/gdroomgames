@@ -3,7 +3,6 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Card from "./Card";
 import Scoreboard from "./Scoreboard";
-import TrumpIndicator from "./TrumpIndicator";
 import BidPanel from "./BidPanel";
 import RoundSummary from "./RoundSummary";
 import VoiceChat from "./VoiceChat";
@@ -29,7 +28,8 @@ const RANK_VAL:  Record<string, number>  = {
   "8": 8, "9": 9, "10": 10, J: 11, Q: 12, K: 13, A: 14,
 };
 const SUIT_SYMBOL: Record<string, string> = { spades: "♠", hearts: "♥", diamonds: "♦", clubs: "♣" };
-const SUIT_COLOR: Record<string, string>  = { spades: "text-gray-200", hearts: "text-red-400", diamonds: "text-red-400", clubs: "text-gray-200" };
+const SUIT_NAME:   Record<string, string> = { spades: "Spades", hearts: "Hearts", diamonds: "Diamonds", clubs: "Clubs" };
+const SUIT_COL:    Record<string, string> = { spades: "text-gray-200", hearts: "text-red-400", diamonds: "text-red-400", clubs: "text-gray-200" };
 
 export default function GameBoard({
   state,
@@ -43,10 +43,10 @@ export default function GameBoard({
   onPlayCard,
   onEndGame,
 }: Props) {
-  const [selectedCard,    setSelectedCard]    = useState<string | null>(null);
-  const [showEndConfirm,  setShowEndConfirm]  = useState(false);
-  const [showMenu,        setShowMenu]        = useState(false);     // hamburger
-  const [showScoreboard,  setShowScoreboard]  = useState(false);     // scoreboard modal
+  const [selectedCard,   setSelectedCard]   = useState<string | null>(null);
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
+  const [showMenu,       setShowMenu]       = useState(false);
+  const [showScoreboard, setShowScoreboard] = useState(false);
 
   const me       = state.players.find((p) => p.username === username);
   const myTurn   = !!me && state.players[state.current_player_index]?.username === username;
@@ -72,86 +72,92 @@ export default function GameBoard({
     ? state.players.find((p) => p.seat === myTeam[0])
     : null;
   const iAmCaptain = !state.teams_enabled || (me?.is_captain ?? true);
-  const activeBidder = state.status === "bidding" ? state.players[state.current_player_index] : null;
+  const activeBidder = state.status === "bidding"
+    ? state.players[state.current_player_index]
+    : null;
 
-  // Compact trump pill for header
-  const trumpPill = state.trump_suit ? (
-    <span className={`flex items-center gap-1 px-2 py-0.5 rounded-lg bg-black/40 border border-yellow-500/30 text-xs font-bold ${SUIT_COLOR[state.trump_suit]}`}>
-      {SUIT_SYMBOL[state.trump_suit]} <span className="text-yellow-400 text-[10px]">trump</span>
-    </span>
-  ) : null;
+  // Use small cards if hand is large
+  const useSmallCards = myHand.length > 9;
+
+  const isActive = state.status === "bidding" || state.status === "playing";
 
   return (
     <div
       className="landscape-required min-h-screen flex flex-col select-none"
       style={{ background: "linear-gradient(160deg,#0a1f2e 0%,#0d2b1e 50%,#091209 100%)" }}
     >
-      {/* ── Top bar ──────────────────────────────────────────────────────────── */}
-      <header className="flex items-center justify-between px-3 py-2 bg-black/55 border-b border-white/5 shrink-0 z-20">
-        {/* Left: logo + code + round */}
-        <div className="flex items-center gap-2">
-          <span className="text-yellow-400 font-extrabold text-sm">♠</span>
-          <span className="bg-black/50 text-gray-300 text-xs px-2 py-0.5 rounded font-mono border border-white/10">
+      {/* ── Compact header ───────────────────────────────────────────────────── */}
+      <header className="flex items-center justify-between px-3 py-1.5 bg-black/55 border-b border-white/5 shrink-0 z-20">
+        {/* Left: logo · code · round · trump */}
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-yellow-400 font-extrabold text-sm shrink-0">♠</span>
+          <span className="bg-black/50 text-gray-300 text-xs px-1.5 py-0.5 rounded font-mono border border-white/10 shrink-0">
             {gameCode}
           </span>
           {state.status !== "finished" && (
-            <span className="text-xs">
+            <span className="text-xs shrink-0">
               <span className="text-gray-500">R</span>
               <span className="text-yellow-400 font-bold">{state.current_round}</span>
               <span className="text-gray-700">/{state.max_rounds}</span>
             </span>
           )}
-          {trumpPill}
+          {/* Trump — always visible, symbol + name */}
+          {state.trump_suit && (
+            <span className={`flex items-center gap-1 text-xs font-semibold shrink-0 ${SUIT_COL[state.trump_suit]}`}>
+              <span className="text-gray-600 font-normal text-[10px]">trump</span>
+              <span>{SUIT_SYMBOL[state.trump_suit]}</span>
+              <span className="hidden sm:inline">{SUIT_NAME[state.trump_suit]}</span>
+            </span>
+          )}
         </div>
 
-        {/* Right: scoreboard btn + hamburger */}
-        <div className="flex items-center gap-1.5">
-          {/* Scoreboard button — always visible */}
+        {/* Right: scoreboard btn + desktop extras + hamburger */}
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={() => setShowScoreboard(true)}
             title="Scoreboard"
-            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-yellow-400 transition-all border border-white/10 text-sm"
+            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-yellow-400 transition-all border border-white/10 text-sm leading-none"
           >
             📊
           </button>
 
-          {/* Desktop: show voice + username + end inline */}
+          {/* Desktop inline */}
           <div className="hidden sm:flex items-center gap-2">
             <VoiceChat gameCode={gameCode} username={username} />
-            <span className="text-gray-600 text-xs">👤 {username}</span>
+            <span className="text-gray-600 text-[11px]">{username}</span>
             {isHost && state.status !== "finished" && (
               <button
                 onClick={() => setShowEndConfirm(true)}
-                className="text-[11px] text-red-400/70 hover:text-red-400 border border-red-400/20 hover:border-red-400/50 px-2 py-0.5 rounded transition-all"
+                className="text-[10px] text-red-400/70 hover:text-red-400 border border-red-400/20 hover:border-red-400/50 px-1.5 py-0.5 rounded transition-all"
               >
                 End
               </button>
             )}
           </div>
 
-          {/* Mobile: hamburger (hides voice/name/end to save space) */}
+          {/* Mobile hamburger */}
           <button
             onClick={() => setShowMenu(!showMenu)}
-            className="sm:hidden p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 text-base leading-none"
+            className="sm:hidden p-1.5 rounded-lg bg-white/5 border border-white/10 text-gray-300 text-base leading-none"
           >
             {showMenu ? "✕" : "☰"}
           </button>
         </div>
       </header>
 
-      {/* ── Mobile hamburger dropdown ─────────────────────────────────────────── */}
+      {/* ── Mobile menu dropdown ─────────────────────────────────────────────── */}
       <AnimatePresence>
         {showMenu && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18 }}
-            className="sm:hidden overflow-hidden bg-black/70 border-b border-white/5 z-20 shrink-0"
+            transition={{ duration: 0.16 }}
+            className="sm:hidden overflow-hidden bg-black/75 border-b border-white/5 shrink-0 z-20"
           >
             <div className="flex items-center gap-3 px-3 py-2 flex-wrap">
               <VoiceChat gameCode={gameCode} username={username} />
-              <span className="text-gray-500 text-xs flex-1">👤 {username}</span>
+              <span className="text-gray-500 text-xs flex-1">{username}</span>
               {isHost && state.status !== "finished" && (
                 <button
                   onClick={() => { setShowEndConfirm(true); setShowMenu(false); }}
@@ -169,24 +175,32 @@ export default function GameBoard({
       <AnimatePresence>
         {gameError && (
           <motion.div
-            initial={{ y: -30, opacity: 0 }}
+            initial={{ y: -24, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -30, opacity: 0 }}
-            className="bg-red-900/80 border-b border-red-500/30 text-red-300 text-xs text-center py-1.5 px-4 shrink-0"
+            exit={{ y: -24, opacity: 0 }}
+            className="bg-red-900/80 border-b border-red-500/30 text-red-300 text-xs text-center py-1 px-4 shrink-0 z-10"
           >
             {gameError}
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── Body ─────────────────────────────────────────────────────────────── */}
-      <div className="flex flex-1 overflow-hidden min-h-0">
+      {/* ── Main content ─────────────────────────────────────────────────────── */}
+      {state.status === "finished" ? (
+        /* Finished: full-center banner */
+        <div className="flex-1 flex items-center justify-center p-4">
+          <GameOverBanner
+            players={state.players}
+            teamsEnabled={state.teams_enabled}
+            teams={state.teams}
+            onNewGame={() => { window.location.href = "/lobby"; }}
+          />
+        </div>
+      ) : (
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
 
-        {/* ── Main playing area ─────────────────────────────────────────────── */}
-        <main className="flex-1 flex flex-col overflow-hidden min-h-0">
-
-          {/* Opponents row */}
-          <div className="shrink-0 px-2 pt-1.5 pb-1">
+          {/* Opponents — compact strip */}
+          <div className="shrink-0 px-2 pt-1 pb-0.5">
             <OtherPlayers
               players={state.players}
               myUsername={username}
@@ -195,71 +209,110 @@ export default function GameBoard({
             />
           </div>
 
-          {/* Table center — trick + status */}
-          <div className="flex-1 flex flex-col items-center justify-center gap-2 px-2 min-h-0">
+          {/* ── Split: LEFT = hand · RIGHT = trick + status ─────────────────── */}
+          <div className="flex flex-1 gap-2 px-2 pb-1 min-h-0 overflow-hidden">
 
-            <TrickArea cards={state.current_trick} trumpSuit={state.trump_suit} />
+            {/* LEFT — Your hand */}
+            <div className="w-[45%] flex flex-col min-h-0 bg-black/20 rounded-xl border border-white/5 p-2">
+              {/* Hand header */}
+              <div className="flex items-center justify-between mb-1.5 shrink-0">
+                <span className="text-gray-400 text-[11px] font-semibold">
+                  Your hand
+                  <span className="text-gray-600 ml-1">({myHand.length})</span>
+                </span>
+                {me && me.bid >= 0 && (
+                  <span className="text-[11px] text-gray-400">
+                    Bid <span className="text-yellow-400 font-bold">{me.bid}</span>
+                    {" "}· Won <span className="text-emerald-400 font-bold">{me.tricks_won}</span>
+                  </span>
+                )}
+              </div>
 
-            {/* Status layer */}
-            <div className="flex flex-col items-center gap-2">
-
-              {state.status === "bidding" && (
-                <>
-                  {myTurn ? (
-                    <BidPanel
-                      maxBid={state.current_round}
-                      onBid={onBid}
-                      isCapitain={iAmCaptain}
-                      captainUsername={captain?.username}
-                    />
-                  ) : !iAmCaptain && state.teams_enabled ? (
-                    <BidPanel
-                      maxBid={state.current_round}
-                      onBid={onBid}
-                      isCapitain={false}
-                      captainUsername={captain?.username}
-                    />
-                  ) : (
-                    <motion.p
-                      animate={{ opacity: [0.5, 1, 0.5] }}
-                      transition={{ repeat: Infinity, duration: 1.8 }}
-                      className="text-gray-400 text-sm"
+              {/* Cards — flex-wrap, fully visible, no overlap */}
+              <div className="flex-1 overflow-y-auto">
+                <div className="flex flex-wrap gap-1 content-start">
+                  {sortedHand.map((card) => (
+                    <motion.div
+                      key={cardKey(card)}
+                      whileTap={myTurn && isActive ? { scale: 0.93 } : {}}
                     >
-                      {activeBidder?.username} is bidding…
-                    </motion.p>
+                      <Card
+                        card={card}
+                        small={useSmallCards}
+                        selected={selectedCard === cardKey(card)}
+                        onClick={
+                          state.status === "playing" && myTurn
+                            ? () => handleCardClick(card)
+                            : undefined
+                        }
+                      />
+                    </motion.div>
+                  ))}
+                  {myHand.length === 0 && (
+                    <p className="text-gray-600 text-xs py-4 px-2">No cards left</p>
                   )}
-                </>
-              )}
+                </div>
+              </div>
 
+              {/* Play hint */}
               {state.status === "playing" && myTurn && (
-                <motion.p
-                  key={selectedCard ? "sel" : "pick"}
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="text-yellow-300 text-sm font-semibold text-center"
-                >
-                  {selectedCard ? "Tap again to play ↓" : "Your turn — tap a card"}
-                </motion.p>
-              )}
-              {state.status === "playing" && !myTurn && (
-                <p className="text-gray-600 text-xs">
-                  Waiting for {state.players[state.current_player_index]?.username}…
+                <p className="text-yellow-300 text-[11px] text-center mt-1.5 shrink-0 font-semibold">
+                  {selectedCard ? "Tap again to play →" : "Tap a card to select"}
                 </p>
               )}
+            </div>
 
-              {state.status === "finished" && (
-                <GameOverBanner
-                  players={state.players}
-                  teamsEnabled={state.teams_enabled}
-                  teams={state.teams}
-                  onNewGame={() => { window.location.href = "/lobby"; }}
-                />
-              )}
+            {/* RIGHT — Trick + status + opponents scroll */}
+            <div className="flex-1 flex flex-col items-center justify-center gap-2 min-h-0">
+
+              {/* Trick grid — each card fully visible with player label */}
+              <TrickGrid
+                cards={state.current_trick}
+                trumpSuit={state.trump_suit}
+                playerCount={state.players.length}
+              />
+
+              {/* Status / action area */}
+              <div className="w-full max-w-xs flex flex-col items-center gap-1.5">
+                {state.status === "bidding" && (
+                  <>
+                    {myTurn ? (
+                      <BidPanel
+                        maxBid={state.current_round}
+                        onBid={onBid}
+                        isCapitain={iAmCaptain}
+                        captainUsername={captain?.username}
+                      />
+                    ) : !iAmCaptain && state.teams_enabled ? (
+                      <BidPanel
+                        maxBid={state.current_round}
+                        onBid={onBid}
+                        isCapitain={false}
+                        captainUsername={captain?.username}
+                      />
+                    ) : (
+                      <motion.p
+                        animate={{ opacity: [0.5, 1, 0.5] }}
+                        transition={{ repeat: Infinity, duration: 1.8 }}
+                        className="text-gray-400 text-sm text-center"
+                      >
+                        {activeBidder?.username} is bidding…
+                      </motion.p>
+                    )}
+                  </>
+                )}
+
+                {state.status === "playing" && !myTurn && (
+                  <p className="text-gray-600 text-xs text-center">
+                    Waiting for {state.players[state.current_player_index]?.username}…
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Mobile: compact score strip */}
-          <div className="shrink-0 border-t border-white/5 bg-black/40 overflow-x-auto px-3 py-1">
+          {/* ── Score strip ─────────────────────────────────────────────────── */}
+          <div className="shrink-0 border-t border-white/5 bg-black/40 px-3 py-1 overflow-x-auto">
             <MobileScoreStrip
               players={state.players}
               currentPlayerIndex={state.current_player_index}
@@ -268,44 +321,8 @@ export default function GameBoard({
               teams={state.teams}
             />
           </div>
-
-          {/* My hand */}
-          {me && state.status !== "finished" && (
-            <div className="shrink-0 bg-black/30 border-t border-white/5 pt-1.5 pb-1">
-              <div className="flex items-center justify-between px-4 mb-1">
-                <span className="text-gray-500 text-[11px]">
-                  Your hand <span className="text-gray-600">({myHand.length})</span>
-                </span>
-                {me.bid >= 0 && (
-                  <span className="text-xs text-gray-400">
-                    Bid <span className="text-yellow-400 font-bold">{me.bid}</span>
-                    {" "}· Won <span className="text-emerald-400 font-bold">{me.tricks_won}</span>
-                  </span>
-                )}
-              </div>
-              <div className="card-hand-scroll">
-                <div className="card-hand-inner">
-                  {sortedHand.map((card) => (
-                    <Card
-                      key={cardKey(card)}
-                      card={card}
-                      selected={selectedCard === cardKey(card)}
-                      onClick={
-                        state.status === "playing" && myTurn
-                          ? () => handleCardClick(card)
-                          : undefined
-                      }
-                    />
-                  ))}
-                  {myHand.length === 0 && state.status === "playing" && (
-                    <p className="text-gray-600 text-sm py-4 px-4">No cards left</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </main>
-      </div>
+        </div>
+      )}
 
       {/* ── Scoreboard modal ──────────────────────────────────────────────────── */}
       <AnimatePresence>
@@ -318,22 +335,22 @@ export default function GameBoard({
             onClick={() => setShowScoreboard(false)}
           >
             <motion.div
-              initial={{ scale: 0.88, y: 20 }}
+              initial={{ scale: 0.88, y: 16 }}
               animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.88, y: 20 }}
+              exit={{ scale: 0.88, y: 16 }}
               className="bg-gray-900 border border-white/10 rounded-2xl p-5 max-w-sm w-full shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex justify-between items-center mb-4">
-                <span className="text-yellow-400 font-bold">
+                <span className="text-yellow-400 font-bold text-sm">
                   Scoreboard — Round {state.current_round}/{state.max_rounds}
+                  {state.trump_suit && (
+                    <span className={`ml-2 font-normal text-xs ${SUIT_COL[state.trump_suit]}`}>
+                      Trump: {SUIT_SYMBOL[state.trump_suit]} {SUIT_NAME[state.trump_suit]}
+                    </span>
+                  )}
                 </span>
-                <button
-                  onClick={() => setShowScoreboard(false)}
-                  className="text-gray-500 hover:text-white text-xl leading-none"
-                >
-                  ✕
-                </button>
+                <button onClick={() => setShowScoreboard(false)} className="text-gray-500 hover:text-white text-lg leading-none">✕</button>
               </div>
               <Scoreboard
                 players={state.players}
@@ -342,17 +359,12 @@ export default function GameBoard({
                 teamsEnabled={state.teams_enabled}
                 teams={state.teams}
               />
-              {state.trump_suit && (
-                <div className="mt-4 flex justify-center">
-                  <TrumpIndicator suit={state.trump_suit} />
-                </div>
-              )}
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── Round Summary overlay ─────────────────────────────────────────────── */}
+      {/* ── Round Summary ─────────────────────────────────────────────────────── */}
       {roundSummary && (
         <RoundSummary
           round={roundSummary.round}
@@ -417,7 +429,7 @@ function OtherPlayers({
   if (!others.length) return null;
 
   return (
-    <div className="flex flex-wrap justify-center gap-1.5">
+    <div className="flex flex-wrap gap-1.5 justify-center">
       {others.map((p) => {
         const isActive  = players[currentPlayerIndex]?.username === p.username;
         const teamColor = teamsEnabled && p.team_index >= 0
@@ -429,33 +441,35 @@ function OtherPlayers({
             key={p.seat}
             animate={
               isActive
-                ? { boxShadow: ["0 0 0 0 rgba(234,179,8,0)", "0 0 12px 3px rgba(234,179,8,0.5)", "0 0 0 0 rgba(234,179,8,0)"] }
+                ? { boxShadow: ["0 0 0 0 rgba(234,179,8,0)", "0 0 10px 2px rgba(234,179,8,0.5)", "0 0 0 0 rgba(234,179,8,0)"] }
                 : {}
             }
             transition={{ repeat: Infinity, duration: 1.4 }}
             className={`
-              flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl border transition-all text-center
-              ${isActive ? "border-yellow-400/60 bg-yellow-400/5" : teamColor ? `${teamColor.bg} ${teamColor.border}` : "border-white/10 bg-black/20"}
+              flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[11px] transition-all
+              ${isActive
+                ? "border-yellow-400/60 bg-yellow-400/5 text-yellow-300"
+                : teamColor
+                ? `${teamColor.bg} ${teamColor.border} ${teamColor.text}`
+                : "border-white/10 bg-black/20 text-gray-300"}
               ${!p.is_connected ? "opacity-40" : ""}
             `}
           >
-            <div className="flex gap-px min-h-[14px] items-end">
-              {Array.from({ length: Math.min(p.hand_count, 7) }).map((_, i) => (
-                <div key={i} className="w-2 h-3.5 bg-emerald-800 border border-emerald-600/60 rounded-[2px]" />
+            {/* Mini card count */}
+            <div className="flex gap-px items-end">
+              {Array.from({ length: Math.min(p.hand_count, 6) }).map((_, i) => (
+                <div key={i} className="w-1.5 h-3 bg-emerald-800 border border-emerald-600/50 rounded-[1px]" />
               ))}
-              {p.hand_count > 7 && (
-                <span className="text-gray-600 text-[9px] self-center ml-0.5">+{p.hand_count - 7}</span>
-              )}
+              {p.hand_count > 6 && <span className="text-gray-600 text-[9px] ml-0.5">+{p.hand_count - 6}</span>}
             </div>
-            <span className={`text-[10px] font-semibold ${isActive ? "text-yellow-300" : teamColor ? teamColor.text : "text-gray-300"}`}>
+            <span className="font-semibold">
               {p.username}
               {!p.is_connected && " 💤"}
-              {teamsEnabled && p.is_captain && <span className="ml-0.5 opacity-50">(C)</span>}
+              {teamsEnabled && p.is_captain && <span className="opacity-50 ml-0.5">(C)</span>}
             </span>
-            <div className="flex gap-1 text-[9px] text-gray-600">
-              <span>B:{p.bid >= 0 ? p.bid : "—"}</span>
-              <span>W:{p.tricks_won}</span>
-            </div>
+            <span className="text-gray-600 text-[9px]">
+              B:{p.bid >= 0 ? p.bid : "—"} W:{p.tricks_won}
+            </span>
           </motion.div>
         );
       })}
@@ -463,47 +477,56 @@ function OtherPlayers({
   );
 }
 
-function TrickArea({ cards, trumpSuit }: { cards: GameState["current_trick"]; trumpSuit: string }) {
+/** Clean trick display: every played card is fully visible with player name below it. */
+function TrickGrid({
+  cards,
+  trumpSuit,
+  playerCount,
+}: {
+  cards: GameState["current_trick"];
+  trumpSuit: string;
+  playerCount: number;
+}) {
   if (!cards.length) {
     return (
-      <div className="w-52 h-28 rounded-2xl border-2 border-dashed border-white/8 flex items-center justify-center">
-        <span className="text-gray-700 text-sm">Table</span>
+      <div className="w-full max-w-xs h-24 rounded-xl border-2 border-dashed border-white/8 flex flex-col items-center justify-center gap-1">
+        <span className="text-gray-700 text-lg">🂠</span>
+        <span className="text-gray-700 text-xs">Waiting for first card…</span>
       </div>
     );
   }
 
-  const offsets = [
-    { x: 0,   y: 0  },
-    { x: -34, y: -5 }, { x: 34, y: -5  },
-    { x: -22, y: 10 }, { x: 22, y: 10  },
-    { x: 0,   y: -18 }, { x: 0, y: 18 },
-  ];
+  const sorted = [...cards].sort((a, b) => a.play_order - b.play_order);
 
   return (
-    <div className="relative w-52 h-36 flex items-center justify-center">
-      {cards.map((tc, i) => {
-        const off     = offsets[i] ?? { x: 0, y: 0 };
-        const isTrump = tc.suit === trumpSuit;
-        return (
-          <motion.div
-            key={`${tc.suit}-${tc.rank}-${tc.deck_id}-${tc.play_order}`}
-            initial={{ scale: 0.3, opacity: 0, y: 60 }}
-            animate={{ scale: 1, opacity: 1, x: off.x, y: off.y }}
-            transition={{ type: "spring", stiffness: 360, damping: 26 }}
-            className="absolute"
-          >
-            <div className="relative">
-              {isTrump && (
-                <div className="absolute -top-1.5 -right-1.5 w-3 h-3 bg-yellow-400 rounded-full z-10 shadow" />
-              )}
-              <Card card={{ suit: tc.suit, rank: tc.rank, deck_id: tc.deck_id }} played />
-              <span className="absolute -bottom-5 left-0 right-0 text-center text-[9px] text-gray-500 whitespace-nowrap">
+    <div className="w-full max-w-xs">
+      <p className="text-gray-600 text-[10px] text-center mb-1.5 uppercase tracking-widest">
+        Trick · {cards.length}/{playerCount} cards
+      </p>
+      <div className="flex flex-wrap gap-2 justify-center">
+        {sorted.map((tc) => {
+          const isTrump = tc.suit === trumpSuit;
+          return (
+            <motion.div
+              key={`${tc.suit}-${tc.rank}-${tc.deck_id}-${tc.play_order}`}
+              initial={{ scale: 0.4, opacity: 0, y: 30 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              transition={{ type: "spring", stiffness: 380, damping: 26 }}
+              className="flex flex-col items-center gap-0.5"
+            >
+              <div className="relative">
+                {isTrump && (
+                  <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-yellow-400 rounded-full z-10 shadow-sm" />
+                )}
+                <Card card={{ suit: tc.suit, rank: tc.rank, deck_id: tc.deck_id }} played />
+              </div>
+              <span className="text-[10px] text-gray-400 max-w-[56px] truncate text-center">
                 {tc.player_name}
               </span>
-            </div>
-          </motion.div>
-        );
-      })}
+            </motion.div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -527,12 +550,13 @@ function MobileScoreStrip({
         {teams.map((seats, ti) => {
           const color   = TEAM_COLORS[ti % TEAM_COLORS.length];
           const members = seats.map((s) => players.find((p) => p.seat === s)).filter(Boolean) as typeof players;
-          const score   = members.reduce((n, p) => n + p.total_score, 0);
+          // All team members share the same total_score — use members[0] to avoid doubling
+          const score   = members[0]?.total_score ?? 0;
           return (
-            <div key={ti} className={`flex items-center gap-1 px-2 py-0.5 rounded-md ${color.bg} border ${color.border}`}>
+            <div key={ti} className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md ${color.bg} border ${color.border}`}>
               <span className={`font-bold ${color.text}`}>T{ti + 1}</span>
-              <span className="text-gray-500">{members.map((p) => p.username).join("&")}</span>
-              <span className={`font-bold ${score >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              <span className="text-gray-500">{members.map((p) => p.username).join(" & ")}</span>
+              <span className={`font-bold ml-0.5 ${score >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                 {score > 0 ? `+${score}` : score}
               </span>
             </div>
@@ -574,11 +598,14 @@ function GameOverBanner({
   onNewGame: () => void;
 }) {
   if (teamsEnabled && teams.length > 0) {
-    const teamResults = teams.map((seats, ti) => {
-      const members = seats.map((s) => players.find((p) => p.seat === s)).filter(Boolean) as typeof players;
-      const score   = members.reduce((n, p) => n + p.total_score, 0);
-      return { ti, members, score };
-    }).sort((a, b) => b.score - a.score);
+    const teamResults = teams
+      .map((seats, ti) => {
+        const members = seats.map((s) => players.find((p) => p.seat === s)).filter(Boolean) as typeof players;
+        // All team members share the same total_score — use members[0] to avoid doubling
+        const score = members[0]?.total_score ?? 0;
+        return { ti, members, score };
+      })
+      .sort((a, b) => b.score - a.score);
 
     const winner = teamResults[0];
     const color  = TEAM_COLORS[winner.ti % TEAM_COLORS.length];
@@ -587,18 +614,18 @@ function GameOverBanner({
       <motion.div
         initial={{ scale: 0.8, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="text-center bg-black/60 border border-yellow-500/30 rounded-2xl px-6 py-4 shadow-2xl max-w-xs w-full"
+        className="text-center bg-black/60 border border-yellow-500/30 rounded-2xl px-6 py-5 shadow-2xl max-w-sm w-full"
       >
-        <p className="text-4xl mb-1">🏆</p>
+        <p className="text-4xl mb-2">🏆</p>
         <p className={`text-xl font-bold ${color.text}`}>Team {winner.ti + 1} wins!</p>
-        <p className="text-gray-400 text-xs mb-3">
+        <p className="text-gray-400 text-xs mt-0.5 mb-4">
           {winner.members.map((p) => p.username).join(" & ")} · {winner.score > 0 ? `+${winner.score}` : winner.score} pts
         </p>
-        <div className="space-y-1.5 mb-4">
+        <div className="space-y-1.5 mb-5">
           {teamResults.map(({ ti, members, score }, rank) => {
             const c = TEAM_COLORS[ti % TEAM_COLORS.length];
             return (
-              <div key={ti} className={`flex justify-between text-sm px-2 py-1 rounded-lg ${c.bg} border ${c.border}`}>
+              <div key={ti} className={`flex justify-between text-sm px-3 py-1.5 rounded-lg ${c.bg} border ${c.border}`}>
                 <span className={c.text}>{rank + 1}. {members.map((p) => p.username).join(" & ")}</span>
                 <span className={score >= 0 ? "text-emerald-400" : "text-red-400"}>
                   {score > 0 ? `+${score}` : score}
@@ -607,7 +634,7 @@ function GameOverBanner({
             );
           })}
         </div>
-        <button onClick={onNewGame} className="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2 rounded-xl transition-all text-sm">
+        <button onClick={onNewGame} className="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2.5 rounded-xl">
           New Game →
         </button>
       </motion.div>
@@ -620,12 +647,12 @@ function GameOverBanner({
     <motion.div
       initial={{ scale: 0.8, opacity: 0 }}
       animate={{ scale: 1, opacity: 1 }}
-      className="text-center bg-black/60 border border-yellow-500/30 rounded-2xl px-6 py-4 shadow-2xl max-w-xs w-full"
+      className="text-center bg-black/60 border border-yellow-500/30 rounded-2xl px-6 py-5 shadow-2xl max-w-sm w-full"
     >
-      <p className="text-4xl mb-1">🏆</p>
+      <p className="text-4xl mb-2">🏆</p>
       <p className="text-yellow-400 text-xl font-bold">{winner.username} wins!</p>
-      <p className="text-gray-500 text-xs mt-0.5 mb-3">{winner.total_score} points</p>
-      <div className="space-y-1 mb-4">
+      <p className="text-gray-500 text-xs mt-0.5 mb-4">{winner.total_score} points</p>
+      <div className="space-y-1.5 mb-5">
         {sorted.map((p, i) => (
           <div key={p.seat} className="flex justify-between text-sm text-gray-300 px-2">
             <span>{i + 1}. {p.username}</span>
@@ -635,7 +662,7 @@ function GameOverBanner({
           </div>
         ))}
       </div>
-      <button onClick={onNewGame} className="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2 rounded-xl transition-all text-sm">
+      <button onClick={onNewGame} className="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2.5 rounded-xl">
         New Game →
       </button>
     </motion.div>

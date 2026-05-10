@@ -20,7 +20,14 @@ export default function Scoreboard({
   const activeUsername = players[currentPlayerIndex]?.username;
 
   if (teamsEnabled && teams.length > 0) {
-    return <TeamScoreboard players={players} teams={teams} myUsername={myUsername} activeUsername={activeUsername} />;
+    return (
+      <TeamScoreboard
+        players={players}
+        teams={teams}
+        myUsername={myUsername}
+        activeUsername={activeUsername}
+      />
+    );
   }
 
   const sorted = [...players].sort((a, b) => b.total_score - a.total_score);
@@ -88,33 +95,36 @@ function TeamScoreboard({
   myUsername: string;
   activeUsername?: string;
 }) {
+  // Sort teams by their score (descending). All members of a team share the same
+  // total_score, so we only need one member's value to represent the team — using
+  // members[0].total_score avoids doubling the value (summing both would give ×2).
+  const sortedTeams = teams
+    .map((seats, ti) => {
+      const members = seats
+        .map((s) => players.find((p) => p.seat === s))
+        .filter(Boolean) as PlayerState[];
+      const teamScore = members[0]?.total_score ?? 0;  // all members share the same score
+      return { ti, seats, members, teamScore };
+    })
+    .sort((a, b) => b.teamScore - a.teamScore);
+
   return (
     <div className="bg-black/40 rounded-xl border border-white/10 overflow-hidden">
       <div className="px-3 py-2 bg-black/30 border-b border-white/10">
         <span className="text-yellow-400 font-semibold text-xs uppercase tracking-widest">Scoreboard</span>
       </div>
 
-      {teams.map((teamSeats, ti) => {
-        const color       = TEAM_COLORS[ti % TEAM_COLORS.length];
-        const teamPlayers = teamSeats
-          .map((seat) => players.find((p) => p.seat === seat))
-          .filter(Boolean) as PlayerState[];
-        const teamScore   = teamPlayers.reduce((s, p) => s + p.total_score, 0);
-        const teamTricks  = teamPlayers.reduce((s, p) => s + p.tricks_won, 0);
-        const captain     = teamPlayers.find((p) => p.is_captain);
-
+      {sortedTeams.map(({ ti, members, teamScore }) => {
+        const color = TEAM_COLORS[ti % TEAM_COLORS.length];
         return (
-          <div key={ti} className={`border-b border-white/5 last:border-0 ${color.bg} ${color.border} border-l-2`}>
-            {/* Team header */}
+          <div key={ti} className={`border-b border-white/5 last:border-0 ${color.bg} border-l-2 ${color.border}`}>
+            {/* Team header row */}
             <div className="flex justify-between items-center px-3 py-1.5">
               <span className={`text-[11px] font-bold uppercase tracking-wider ${color.text}`}>
                 Team {ti + 1}
-                {captain && (
-                  <span className="ml-1 text-gray-500 font-normal normal-case tracking-normal">
-                    · {captain.username}
-                    {captain.bid >= 0 && ` bid ${captain.bid}`}
-                  </span>
-                )}
+                <span className="ml-1.5 text-gray-500 font-normal normal-case tracking-normal text-[10px]">
+                  {members.map((p) => p.username).join(" & ")}
+                </span>
               </span>
               <span className={`text-xs font-bold ${scoreColor(teamScore)}`}>
                 {teamScore > 0 ? `+${teamScore}` : teamScore}
@@ -122,13 +132,13 @@ function TeamScoreboard({
             </div>
 
             {/* Team members */}
-            <table className="w-full text-xs mb-1">
+            <table className="w-full text-xs">
               <tbody>
-                {teamPlayers.map((p) => {
+                {members.map((p) => {
                   const isActive = p.username === activeUsername;
                   const isMe     = p.username === myUsername;
                   return (
-                    <tr key={p.seat} className={`${isActive ? "bg-yellow-400/8" : ""}`}>
+                    <tr key={p.seat} className={`border-t border-white/5 ${isActive ? "bg-yellow-400/8" : ""}`}>
                       <td className="px-3 py-1">
                         <div className="flex items-center gap-1.5">
                           {isActive && <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse shrink-0" />}
@@ -136,11 +146,11 @@ function TeamScoreboard({
                             {p.username}
                           </span>
                           {isMe && <span className="text-gray-600 text-[9px]">(you)</span>}
-                          {p.is_captain && <span className={`text-[9px] font-bold ${color.text}`}>C</span>}
+                          {p.is_captain && <span className={`text-[9px] font-bold ${color.text} ml-0.5`}>C</span>}
                         </div>
                       </td>
                       <td className="px-2 py-1 text-center text-gray-500">
-                        {p.bid >= 0 ? p.bid : "—"}
+                        {p.is_captain && p.bid >= 0 ? p.bid : "—"}
                       </td>
                       <td className="px-2 py-1 text-center text-gray-500">{p.tricks_won}</td>
                     </tr>

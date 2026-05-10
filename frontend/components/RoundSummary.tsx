@@ -32,11 +32,7 @@ export default function RoundSummary({ round, scores, onClose }: Props) {
           <h2 className="text-yellow-400 text-xl font-bold text-center">Round {round} Done!</h2>
           <p className="text-gray-500 text-xs text-center mt-1 mb-5">Tap anywhere to continue</p>
 
-          {teamsEnabled ? (
-            <TeamScores scores={scores} />
-          ) : (
-            <SoloScores scores={scores} />
-          )}
+          {teamsEnabled ? <TeamScores scores={scores} /> : <SoloScores scores={scores} />}
 
           <button
             onClick={onClose}
@@ -79,45 +75,62 @@ function SoloScores({ scores }: { scores: RoundScore[] }) {
 }
 
 function TeamScores({ scores }: { scores: RoundScore[] }) {
-  // Group by team_index, sorted by team total desc
+  // Group by team_index
   const teamMap = new Map<number, RoundScore[]>();
   for (const s of scores) {
     const ti = s.team_index >= 0 ? s.team_index : 0;
     if (!teamMap.has(ti)) teamMap.set(ti, []);
     teamMap.get(ti)!.push(s);
   }
-  const teams = [...teamMap.entries()].sort(
-    (a, b) =>
-      b[1].reduce((n, s) => n + s.delta, 0) -
-      a[1].reduce((n, s) => n + s.delta, 0)
-  );
+
+  // All members of a team share the same delta (same team score was applied to each).
+  // Use members[0].delta as the authoritative team delta — do NOT sum them, that
+  // would double-count (e.g. -10 + -10 = -20 instead of -10).
+  const teams = [...teamMap.entries()]
+    .map(([ti, members]) => ({ ti, members, teamDelta: members[0]?.delta ?? 0 }))
+    .sort((a, b) => b.teamDelta - a.teamDelta);
 
   return (
     <div className="space-y-3 mb-5">
-      {teams.map(([ti, members]) => {
-        const color      = TEAM_COLORS[ti % TEAM_COLORS.length];
-        const teamDelta  = members.reduce((n, s) => n + s.delta, 0);
-        const sorted     = [...members].sort((a, b) => b.delta - a.delta);
+      {teams.map(({ ti, members, teamDelta }) => {
+        const color  = TEAM_COLORS[ti % TEAM_COLORS.length];
+        const captain = members.find((m) => {
+          // Captain placed the bid; non-captains have bid copied from captain
+          // but we can't easily tell here — just show the first member's bid
+          return true;
+        });
+        // Display the captain's bid (all members share the same bid value after copy)
+        const sharedBid     = members[0]?.bid ?? 0;
+        const combinedTricks = members.reduce((n, s) => n + s.tricks_won, 0);
+
         return (
           <div key={ti} className={`rounded-xl border ${color.border} ${color.bg} overflow-hidden`}>
             {/* Team header */}
             <div className="flex justify-between items-center px-3 py-2">
-              <span className={`text-xs font-bold uppercase tracking-wider ${color.text}`}>Team {ti + 1}</span>
-              <span className={`text-sm font-bold ${teamDelta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                {teamDelta > 0 ? `+${teamDelta}` : teamDelta}
-              </span>
+              <div>
+                <span className={`text-xs font-bold uppercase tracking-wider ${color.text}`}>
+                  Team {ti + 1}
+                </span>
+                <span className="text-gray-500 text-[10px] ml-2">
+                  {members.map((s) => s.username).join(" & ")}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className={`text-sm font-bold ${teamDelta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                  {teamDelta > 0 ? `+${teamDelta}` : teamDelta}
+                </span>
+                <span className="text-gray-600 text-[10px] ml-1.5">
+                  bid {sharedBid} · won {combinedTricks}
+                </span>
+              </div>
             </div>
             {/* Members */}
             <table className="w-full text-xs border-t border-white/5">
               <tbody>
-                {sorted.map((s) => (
+                {members.map((s) => (
                   <tr key={s.username} className="border-t border-white/5 first:border-0">
-                    <td className="px-3 py-1.5 text-gray-300">{s.username}</td>
-                    <td className="px-2 py-1.5 text-center text-gray-500">B:{s.bid}</td>
-                    <td className="px-2 py-1.5 text-center text-gray-500">W:{s.tricks_won}</td>
-                    <td className={`px-3 py-1.5 text-right font-semibold ${s.delta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                      {s.delta > 0 ? `+${s.delta}` : s.delta}
-                    </td>
+                    <td className="px-3 py-1 text-gray-300">{s.username}</td>
+                    <td className="px-2 py-1 text-center text-gray-500">W:{s.tricks_won}</td>
                   </tr>
                 ))}
               </tbody>

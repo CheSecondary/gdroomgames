@@ -168,23 +168,26 @@ export default function LobbyPage() {
                 </div>
               </div>
 
-              {/* Teams toggle (only for even ≥ 4) */}
-              <div className={`mb-5 transition-opacity ${teamsAllowed ? "opacity-100" : "opacity-30 pointer-events-none"}`}>
-                <label className="block text-gray-400 text-xs font-semibold uppercase tracking-widest mb-2">
-                  Teams {!teamsAllowed && "(need even players ≥ 4)"}
-                </label>
-                <button
-                  onClick={() => teamsAllowed && setTeamsOn(!teamsOn)}
-                  className={`w-full py-2.5 rounded-xl font-bold text-sm transition-all border ${
-                    teamsOn
-                      ? "bg-emerald-500/30 text-emerald-300 border-emerald-500/50"
-                      : "bg-white/5 text-gray-500 border-white/10"
-                  }`}
-                >
-                  {teamsOn
-                    ? `✓ Teams on — ${numPlayers / 2} teams of 2`
-                    : "No teams (solo)"}
-                </button>
+              {/* Teams — Solo / Teams buttons, same pattern as Deck Size */}
+              <label className={`block text-xs font-semibold uppercase tracking-widest mb-2 transition-opacity ${teamsAllowed ? "text-gray-400" : "text-gray-600"}`}>
+                Mode {!teamsAllowed && <span className="text-gray-700 font-normal normal-case tracking-normal">(teams need even ≥ 4 players)</span>}
+              </label>
+              <div className={`flex gap-2 mb-5 transition-opacity ${teamsAllowed ? "opacity-100" : "opacity-40 pointer-events-none"}`}>
+                {([false, true] as const).map((isTeam) => (
+                  <button
+                    key={String(isTeam)}
+                    onClick={() => teamsAllowed && setTeamsOn(isTeam)}
+                    className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-all border ${
+                      teamsOn === isTeam && teamsAllowed
+                        ? "bg-yellow-400 text-gray-900 border-yellow-400"
+                        : "bg-white/5 text-gray-400 border-white/10 hover:text-white"
+                    }`}
+                  >
+                    {isTeam
+                      ? `🤝 Teams (${numPlayers / 2}v${numPlayers / 2})`
+                      : "Solo"}
+                  </button>
+                ))}
               </div>
 
               {/* Info strip */}
