@@ -57,9 +57,7 @@ export default function VoiceChat({ gameCode, username }: Props) {
       const uid = makeAgoraUid(username);
       await client.join(appId, gameCode, null, uid);
 
-      const micTrack = await AgoraRTC.createMicrophoneAudioTrack({
-        encoderConfig: "speech_low_quality",
-      });
+      const micTrack = await AgoraRTC.createMicrophoneAudioTrack();
       localTrackRef.current = micTrack;
       await client.publish([micTrack]);
 
