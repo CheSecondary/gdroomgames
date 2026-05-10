@@ -23,6 +23,11 @@ class CreateGameView(APIView):
         num_decks        = max(1, min(2, int(request.data.get("num_decks", 1))))
         expected_players = max(2, min(7, int(request.data.get("expected_players", 4))))
         teams_enabled    = bool(request.data.get("teams_enabled", False))
+        # num_rounds = 0 means "use the formula max at start time"
+        num_rounds_raw   = int(request.data.get("num_rounds", 0))
+        # Clamp to valid range; 0 stays 0 (= use max)
+        abs_max          = (52 * num_decks) // expected_players
+        num_rounds       = max(1, min(abs_max, num_rounds_raw)) if num_rounds_raw > 0 else 0
 
         if not username:
             return Response({"error": "Username required."}, status=400)
@@ -37,6 +42,7 @@ class CreateGameView(APIView):
             num_decks=num_decks,
             expected_players=expected_players,
             teams_enabled=teams_enabled,
+            max_rounds=num_rounds,   # 0 = host didn't pick, use formula at start
         )
         Player.objects.create(game=game, username=username, seat=0)
         return Response(GameSerializer(game).data, status=status.HTTP_201_CREATED)

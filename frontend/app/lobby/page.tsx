@@ -23,6 +23,15 @@ export default function LobbyPage() {
   const [error,   setError]   = useState("");
 
   const teamsAllowed = numPlayers >= 4 && numPlayers % 2 === 0;
+  const maxR = Math.floor((52 * numDecks) / numPlayers);
+
+  // Rounds picker (default to max)
+  const [numRounds, setNumRounds] = useState(maxR);
+  // Keep numRounds in range whenever player/deck count changes
+  useEffect(() => {
+    setNumRounds(Math.min(numRounds, maxR) || maxR);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maxR]);
 
   useEffect(() => {
     const saved = localStorage.getItem("os_username");
@@ -39,7 +48,7 @@ export default function LobbyPage() {
     if (!username) return;
     setError(""); setLoading(true);
     try {
-      const game = await api.createGame(username, numDecks, numPlayers, teamsOn);
+      const game = await api.createGame(username, numDecks, numPlayers, teamsOn, numRounds);
       router.push(`/game/${game.code}`);
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
@@ -55,8 +64,6 @@ export default function LobbyPage() {
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
   }
-
-  const maxR = Math.floor((52 * numDecks) / numPlayers);
 
   return (
     <div
@@ -137,6 +144,30 @@ export default function LobbyPage() {
                 ))}
               </div>
 
+              {/* Rounds */}
+              <label className="block text-gray-400 text-xs font-semibold uppercase tracking-widest mb-2">
+                Rounds
+                <span className="ml-2 text-yellow-400 font-bold normal-case tracking-normal">
+                  {numRounds} {numRounds === 1 ? "round" : "rounds"}
+                </span>
+                <span className="ml-1 text-gray-600 font-normal tracking-normal">/ max {maxR}</span>
+              </label>
+              <div className="mb-5">
+                <input
+                  type="range"
+                  min={1}
+                  max={maxR}
+                  value={numRounds}
+                  onChange={(e) => setNumRounds(Number(e.target.value))}
+                  className="w-full h-2 rounded-full appearance-none bg-white/10 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-yellow-400 [&::-webkit-slider-thumb]:cursor-pointer [&::-moz-range-thumb]:bg-yellow-400 [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:rounded-full cursor-pointer"
+                />
+                <div className="flex justify-between text-[11px] text-gray-600 mt-1">
+                  <span>1</span>
+                  {maxR > 2 && <span>{Math.ceil(maxR / 2)}</span>}
+                  <span>{maxR}</span>
+                </div>
+              </div>
+
               {/* Teams toggle (only for even ≥ 4) */}
               <div className={`mb-5 transition-opacity ${teamsAllowed ? "opacity-100" : "opacity-30 pointer-events-none"}`}>
                 <label className="block text-gray-400 text-xs font-semibold uppercase tracking-widest mb-2">
@@ -158,8 +189,13 @@ export default function LobbyPage() {
 
               {/* Info strip */}
               <div className="bg-black/30 rounded-xl px-3 py-2 mb-5 text-xs text-gray-500 space-y-0.5">
-                <p>Rounds: <span className="text-gray-300">1 → {maxR} cards each</span></p>
+                <p>Rounds: <span className="text-gray-300">1 → {numRounds} cards each</span></p>
                 <p>Players: <span className="text-gray-300">{numPlayers} expected</span></p>
+                {numRounds < maxR && (
+                  <p className="text-amber-500">
+                    Game ends after round {numRounds} (not all {maxR} rounds)
+                  </p>
+                )}
                 {numDecks === 2 && numPlayers > 2 && (
                   <p className="text-amber-600">
                     Round {maxR}: {maxR * numPlayers} cards from 104 ({104 - maxR * numPlayers} discarded)

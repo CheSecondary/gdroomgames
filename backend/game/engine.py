@@ -63,9 +63,14 @@ def determine_winner(trick_cards: list[dict], lead_suit: str, trump_suit: str) -
 
 
 def _score_one(bid: int, tricks_won: int) -> int:
-    """Scoring for a single bid/tricks pair (used for both solo and team scoring)."""
-    if bid == 0 and tricks_won == 0:
-        return 10                          # bid-zero bonus
+    """Scoring for a single bid/tricks pair (used for both solo and team scoring).
+
+    bid=0, won=0 → 0  (not +10; bidding zero means you want zero, gain nothing)
+    bid=0, won=N → +N (each overtrick counts; you can't go negative on a zero bid)
+    bid=N, won=N → +10*N
+    bid=N, won>N → +10*N + overtricks
+    bid=N, won<N → -10 per missed trick
+    """
     if tricks_won >= bid:
         return 10 * bid + (tricks_won - bid)   # 10 per bid + 1 per overtrick
     return -10 * (bid - tricks_won)            # -10 per miss

@@ -16,10 +16,11 @@ export const api = {
     num_decks: number,
     expected_players: number,
     teams_enabled: boolean,
+    num_rounds: number,       // 0 = use formula max
   ) =>
     req("/api/game/create/", {
       method: "POST",
-      body: JSON.stringify({ username, num_decks, expected_players, teams_enabled }),
+      body: JSON.stringify({ username, num_decks, expected_players, teams_enabled, num_rounds }),
     }),
 
   joinGame: (username: string, code: string) =>

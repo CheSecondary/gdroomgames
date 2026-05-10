@@ -72,7 +72,10 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.send_error("Need at least 2 players to start.")
             return
 
-        max_r = engine.max_rounds(len(players), game.num_decks)
+        actual_max = engine.max_rounds(len(players), game.num_decks)
+        # game.max_rounds is set to the host's choice at creation (0 = use formula)
+        chosen = game.max_rounds
+        max_r  = min(chosen, actual_max) if chosen > 0 else actual_max
 
         # Assign teams if enabled
         teams = []
