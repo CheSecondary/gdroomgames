@@ -53,8 +53,18 @@ export function useGameSocket(gameCode: string, username: string) {
 
     connect();
 
+    // Ping Render backend every 3 minutes to prevent free-tier from sleeping during a long game
+    // WebSockets don't count as HTTP traffic for Render's 15-minute inactivity timeout.
+    const pingInterval = setInterval(async () => {
+      try {
+        const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        await fetch(`${API_BASE}/api/game/health/`, { cache: 'no-store' });
+      } catch (e) {}
+    }, 3 * 60 * 1000);
+
     return () => {
       clearTimeout(timeout);
+      clearInterval(pingInterval);
       if (socket) {
         socket.onclose = null; // Prevent auto-reconnect on unmount
         socket.close();
