@@ -108,14 +108,9 @@ def calculate_team_round_scores(teams: list[list[int]], players_data: list[dict]
 
 def assign_teams(seats: list[int]) -> list[list[int]]:
     """
-    Randomly pair seats into teams of 2.
-    Returns [[seat_a, seat_b], [seat_c, seat_d], ...]
-    Seats are sorted within each team for determinism.
+    Pair seats by join order: seat i teams with seat i + N/2.
+    4p: [0,2],[1,3]  6p: [0,3],[1,4],[2,5]  8p: [0,4],[1,5],[2,6],[3,7]
     """
-    shuffled = seats[:]
-    random.shuffle(shuffled)
-    teams = []
-    for i in range(0, len(shuffled), 2):
-        pair = sorted(shuffled[i:i + 2])
-        teams.append(pair)
-    return teams
+    ordered = sorted(seats)
+    half = len(ordered) // 2
+    return [[ordered[i], ordered[i + half]] for i in range(half)]

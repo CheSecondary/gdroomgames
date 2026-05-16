@@ -27,30 +27,6 @@ html, body { height: 100%; margin: 0; padding: 0; }
 /* Fan-spread on hover of the whole hand */
 .card-hand-inner:hover > * { margin-right: -2px; }
 
-/* ── Landscape prompt overlay (mobile portrait) ───────────────────────────── */
-@media screen and (max-width: 768px) and (orientation: portrait) {
-  .landscape-required::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    background: #0d1b2a;
-    z-index: 9999;
-  }
-  .landscape-required::after {
-    content: "Rotate your device 📱→";
-    position: fixed;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.4rem;
-    color: #facc15;
-    font-weight: 700;
-    z-index: 10000;
-    text-align: center;
-    white-space: pre;
-  }
-}
 
 /* ── Card suit colours ────────────────────────────────────────────────────── */
 .suit-red   { color: #ef4444; }

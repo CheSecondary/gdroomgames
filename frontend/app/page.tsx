@@ -54,6 +54,7 @@ export default function Home() {
     <div
       className="min-h-screen flex flex-col items-center justify-center p-4"
       style={{ background: "radial-gradient(ellipse at center,#1a4731 0%,#0d2b1e 60%,#091a12 100%)" }}
+      suppressHydrationWarning
     >
       {/* Floating suit decorations */}
       {SUITS.map((s, i) => (

@@ -41,6 +41,8 @@ export interface GameState {
   trump_suit: Suit | "";
   current_player_index: number;
   lead_player_index: number;
+  round_bid_lead_seat: number;
+  round_play_lead_seat: number;
   num_decks: number;
   expected_players: number;
   teams_enabled: boolean;

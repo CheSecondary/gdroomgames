@@ -85,7 +85,7 @@ export default function GameBoard({
 
   return (
     <div
-      className="landscape-required min-h-screen flex flex-col select-none"
+      className="min-h-screen flex flex-col select-none"
       style={{ background: "linear-gradient(160deg,#0a1f2e 0%,#0d2b1e 50%,#091209 100%)" }}
     >
       {/* ── Compact header ───────────────────────────────────────────────────── */}
@@ -111,6 +111,26 @@ export default function GameBoard({
               <span className="hidden sm:inline text-sm">{SUIT_NAME[state.trump_suit]}</span>
             </span>
           )}
+          {/* Current bidder (live) · who starts play */}
+          {isActive && (() => {
+            const currentBidder = state.status === "bidding"
+              ? state.players[state.current_player_index]
+              : null;
+            const playLeader = state.players.find(p => p.seat === state.round_play_lead_seat);
+            return (
+              <span className="hidden sm:flex items-center gap-1.5 text-[10px] shrink-0 ml-1">
+                {currentBidder && (
+                  <>
+                    <span className="text-gray-600">bid</span>
+                    <span className="text-yellow-400 font-semibold">{currentBidder.username}</span>
+                    <span className="text-gray-700">·</span>
+                  </>
+                )}
+                <span className="text-gray-600">starts</span>
+                <span className="text-emerald-400 font-semibold">{playLeader?.username ?? "—"}</span>
+              </span>
+            );
+          })()}
         </div>
 
         {/* Right: scoreboard btn + desktop extras + hamburger */}
@@ -211,11 +231,11 @@ export default function GameBoard({
             />
           </div>
 
-          {/* ── Split: LEFT = hand · RIGHT = trick + status ─────────────────── */}
-          <div className="flex flex-1 gap-2 px-2 pb-1 min-h-0 overflow-hidden">
+          {/* ── Split: landscape=side-by-side, portrait=stacked ──────────────── */}
+          <div className="flex flex-1 gap-2 px-2 pb-1 min-h-0 overflow-hidden landscape:flex-row portrait:flex-col">
 
-            {/* LEFT — Your hand */}
-            <div className="w-[45%] flex flex-col min-h-0 bg-black/20 rounded-xl border border-white/5 p-2">
+            {/* Your hand — LEFT in landscape, BOTTOM in portrait */}
+            <div className="landscape:w-[45%] portrait:order-2 portrait:shrink-0 portrait:h-[44%] flex flex-col min-h-0 bg-black/20 rounded-xl border border-white/5 p-2">
               {/* Hand header */}
               <div className="flex items-center justify-between mb-1.5 shrink-0">
                 <span className="text-gray-400 text-[11px] font-semibold">
@@ -264,8 +284,8 @@ export default function GameBoard({
               )}
             </div>
 
-            {/* RIGHT — Trick + status + opponents scroll */}
-            <div className="flex-1 flex flex-col items-center justify-center gap-2 min-h-0">
+            {/* Trick + status — RIGHT in landscape, TOP in portrait */}
+            <div className="flex-1 flex flex-col items-center justify-center gap-2 min-h-0 portrait:order-1 portrait:overflow-y-auto">
 
               {/* Trick grid — each card fully visible with player label */}
               <TrickGrid
@@ -471,13 +491,8 @@ function OtherPlayers({
               ${!p.is_connected ? "opacity-40" : ""}
             `}
           >
-            {/* Mini card count */}
-            <div className="flex gap-px items-end">
-              {Array.from({ length: Math.min(p.hand_count, 6) }).map((_, i) => (
-                <div key={i} className="w-1.5 h-3 bg-emerald-800 border border-emerald-600/50 rounded-[1px]" />
-              ))}
-              {p.hand_count > 6 && <span className="text-gray-600 text-[9px] ml-0.5">+{p.hand_count - 6}</span>}
-            </div>
+            {/* Player join number */}
+            <span className="text-gray-600 font-mono text-[10px] font-bold">#{p.seat + 1}</span>
             <span className="font-semibold">
               {p.username}
               {!p.is_connected && " 💤"}

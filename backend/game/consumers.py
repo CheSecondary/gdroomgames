@@ -161,18 +161,9 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.db_deal_hands(players, hands)
         await self.db_reset_bids_and_tricks(players)
 
-        # Determine first bidder:
-        # solo → lead_player_index; teams → first captain clockwise from lead
-        if game.teams_enabled and game.teams:
-            caps  = captain_seats(game)
-            first = find_next_idx(
-                (game.lead_player_index - 1) % len(players),
-                len(players),
-                lambda i: players[i].seat in caps,
-            )
-            first_bid_idx = first if first != -1 else game.lead_player_index
-        else:
-            first_bid_idx = game.lead_player_index
+        # First bidder: in teams mode lead_player_index is always the lead team's captain;
+        # in solo mode it's just the lead player.
+        first_bid_idx = game.lead_player_index
 
         await self.db_update_game(
             game,
@@ -195,10 +186,14 @@ class GameConsumer(AsyncWebsocketConsumer):
                 lambda i: players[i].seat in caps and players[i].bid < 0,
             )
             if next_idx == -1:
-                # All captains have bid → start playing
+                # All captains have bid → play starts with first seat of the team
+                # immediately after the team that led bidding this round.
+                lead_team = team_index_for_seat(game, game.lead_player_index)
+                next_team = (lead_team + 1) % len(game.teams)
+                play_first_seat = game.teams[next_team][0]
                 await self.db_update_game(
                     game, status=Game.STATUS_PLAYING,
-                    current_player_index=game.lead_player_index,
+                    current_player_index=play_first_seat,
                 )
                 await self.db_create_trick(game)
             else:
@@ -206,9 +201,10 @@ class GameConsumer(AsyncWebsocketConsumer):
         else:
             all_bid = all(p.bid >= 0 for p in players)
             if all_bid:
+                play_first = (game.lead_player_index + 1) % len(players)
                 await self.db_update_game(
                     game, status=Game.STATUS_PLAYING,
-                    current_player_index=game.lead_player_index,
+                    current_player_index=play_first,
                 )
                 await self.db_create_trick(game)
             else:
@@ -305,7 +301,13 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.broadcast_state()
             return
 
-        new_lead = (game.lead_player_index + 1) % len(players)
+        if game.teams_enabled and game.teams:
+            # Rotate lead to the captain of the next team in sequence
+            lead_team = team_index_for_seat(game, game.lead_player_index)
+            next_lead_team = (lead_team + 1) % len(game.teams)
+            new_lead = game.teams[next_lead_team][0]  # captain seat = player index
+        else:
+            new_lead = (game.lead_player_index + 1) % len(players)
         await self.db_update_game(
             game,
             current_round=game.current_round + 1,
@@ -426,6 +428,17 @@ class GameConsumer(AsyncWebsocketConsumer):
             for p in players
         ]
 
+        # Round leader seats for header display
+        if game.teams_enabled and game.teams:
+            lead_team_idx  = team_index_for_seat(game, game.lead_player_index)
+            next_team_idx  = (lead_team_idx + 1) % len(game.teams)
+            round_bid_lead_seat  = game.lead_player_index
+            round_play_lead_seat = game.teams[next_team_idx][0]
+        else:
+            n = len(players)
+            round_bid_lead_seat  = game.lead_player_index
+            round_play_lead_seat = (game.lead_player_index + 1) % n if n > 1 else game.lead_player_index
+
         return {
             "game_code":      game.code,
             "host_username":  game.host_username,
@@ -435,6 +448,8 @@ class GameConsumer(AsyncWebsocketConsumer):
             "trump_suit":     game.trump_suit,
             "current_player_index": game.current_player_index,
             "lead_player_index":    game.lead_player_index,
+            "round_bid_lead_seat":  round_bid_lead_seat,
+            "round_play_lead_seat": round_play_lead_seat,
             "num_decks":      game.num_decks,
             "expected_players": game.expected_players,
             "teams_enabled":  game.teams_enabled,
