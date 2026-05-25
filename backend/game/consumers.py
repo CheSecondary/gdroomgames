@@ -761,9 +761,15 @@ class GameConsumer(AsyncWebsocketConsumer):
             game__code=self.game_code, username=self.username
         ).update(is_connected=connected)
         if not updated:
-            Spectator.objects.filter(
-                game__code=self.game_code, username=self.username
-            ).update(is_connected=connected)
+            if connected:
+                Spectator.objects.filter(
+                    game__code=self.game_code, username=self.username
+                ).update(is_connected=True)
+            else:
+                # Spectator leaving — remove the row entirely, they never existed
+                Spectator.objects.filter(
+                    game__code=self.game_code, username=self.username
+                ).delete()
 
     @database_sync_to_async
     def db_delete_game(self, game):
