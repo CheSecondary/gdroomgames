@@ -76,7 +76,7 @@ export function useGameSocket(gameCode: string, username: string) {
       try {
         const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
         await fetch(`${API_BASE}/api/game/health/`, { cache: 'no-store' });
-      } catch (e) {}
+      } catch {}
     }, 3 * 60 * 1000);
 
     return () => {

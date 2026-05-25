@@ -20,7 +20,6 @@ interface Props {
   chatMessages: ChatMessage[];
   sendChat: (message: string) => void;
   onClearSummary: () => void;
-  onStartGame: () => void;
   onBid: (bid: number) => void;
   onPlayCard: (card: CardType) => void;
   onEndGame: () => void;
@@ -47,7 +46,6 @@ export default function GameBoard({
   chatMessages,
   sendChat,
   onClearSummary,
-  onStartGame,
   onBid,
   onPlayCard,
   onEndGame,
@@ -73,9 +71,12 @@ export default function GameBoard({
 
   const hasNewMessages = chatMessages.length > lastReadCount && !showChat;
 
+  if (showChat && lastReadCount !== chatMessages.length) {
+    setLastReadCount(chatMessages.length);
+  }
+
   useEffect(() => {
     if (showChat) {
-      setLastReadCount(chatMessages.length);
       chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [chatMessages.length, showChat]);

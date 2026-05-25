@@ -79,7 +79,6 @@ export default function GamePage() {
       chatMessages={chatMessages}
       sendChat={sendChat}
       onClearSummary={clearSummary}
-      onStartGame={startGame}
       onBid={placeBid}
       onPlayCard={playCard}
       onEndGame={endGame}
