@@ -56,6 +56,7 @@ export default function GameBoard({
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showMenu,       setShowMenu]       = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
+  const [showVoice,      setShowVoice]      = useState(false);
 
   const [showChat, setShowChat] = useState(false);
   const [chatInput, setChatInput] = useState("");
@@ -155,31 +156,31 @@ export default function GameBoard({
               <span className="hidden sm:inline text-sm">{SUIT_NAME[state.trump_suit]}</span>
             </span>
           ) : null}
-          {/* Current bidder (live) · who starts play */}
+          {/* Current bidder (live) · who starts play — visible on all screen sizes */}
           {isActive && (() => {
             const currentBidder = state.status === "bidding"
               ? state.players[state.current_player_index]
               : null;
             const playLeader = state.players.find(p => p.seat === state.round_play_lead_seat);
             return (
-              <span className="hidden sm:flex items-center gap-1.5 text-[10px] shrink-0 ml-1">
+              <span className="flex items-center gap-1 text-[10px] shrink-0 ml-1">
                 {currentBidder && (
                   <>
                     <span className="text-gray-600">bid</span>
-                    <span className="text-yellow-400 font-semibold">{currentBidder.username}</span>
+                    <span className="text-yellow-400 font-semibold truncate max-w-[60px]">{currentBidder.username}</span>
                     <span className="text-gray-700">·</span>
                   </>
                 )}
                 <span className="text-gray-600">starts</span>
-                <span className="text-emerald-400 font-semibold">{playLeader?.username ?? "—"}</span>
+                <span className="text-emerald-400 font-semibold truncate max-w-[60px]">{playLeader?.username ?? "—"}</span>
               </span>
             );
           })()}
         </div>
 
-        {/* Right: scoreboard btn + desktop extras + hamburger */}
+        {/* Right: chat (always) + desktop inline + hamburger (mobile) */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {/* Chat Toggle Button */}
+          {/* Chat — always visible, most used */}
           <button
             onClick={toggleChat}
             title="Chat"
@@ -191,17 +192,26 @@ export default function GameBoard({
             )}
           </button>
 
-          <button
-            onClick={() => setShowScoreboard(true)}
-            title="Scoreboard"
-            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-yellow-400 transition-all border border-white/10 text-sm leading-none"
-          >
-            📊
-          </button>
-
-          {/* Desktop inline */}
-          <div className="hidden sm:flex items-center gap-2">
-            <VoiceChat gameCode={gameCode} username={username} />
+          {/* Desktop inline (md+) */}
+          <div className="hidden md:flex items-center gap-1.5">
+            <button
+              onClick={() => setShowScoreboard(true)}
+              title="Scoreboard"
+              className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-yellow-400 transition-all border border-white/10 text-sm leading-none"
+            >
+              📊
+            </button>
+            <button
+              onClick={() => setShowVoice(v => !v)}
+              title="Voice chat"
+              className={`p-1.5 rounded-lg border text-sm leading-none transition-all ${
+                showVoice
+                  ? "bg-emerald-600/30 border-emerald-500/50 text-emerald-400"
+                  : "bg-white/5 border-white/10 text-gray-400 hover:text-emerald-400"
+              }`}
+            >
+              🎙️
+            </button>
             <span className="text-gray-600 text-[11px]">{username}</span>
             {isHost && state.status !== "finished" && (
               <button
@@ -213,17 +223,17 @@ export default function GameBoard({
             )}
           </div>
 
-          {/* Mobile hamburger */}
+          {/* Hamburger — mobile + tablet (< md), both portrait and landscape */}
           <button
             onClick={() => setShowMenu(!showMenu)}
-            className="sm:hidden p-1.5 rounded-lg bg-white/5 border border-white/10 text-gray-300 text-base leading-none"
+            className="md:hidden p-1.5 rounded-lg bg-white/5 border border-white/10 text-gray-300 text-base leading-none"
           >
             {showMenu ? "✕" : "☰"}
           </button>
         </div>
       </header>
 
-      {/* ── Mobile menu dropdown ─────────────────────────────────────────────── */}
+      {/* ── Hamburger menu (mobile) ──────────────────────────────────────────── */}
       <AnimatePresence>
         {showMenu && (
           <motion.div
@@ -231,24 +241,30 @@ export default function GameBoard({
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.16 }}
-            className="sm:hidden overflow-hidden bg-black/75 border-b border-white/5 shrink-0 z-20"
+            className="md:hidden overflow-hidden bg-black/75 border-b border-white/5 shrink-0 z-20"
           >
-            <div className="flex items-center gap-3 px-3 py-2 flex-wrap">
-              <VoiceChat gameCode={gameCode} username={username} />
+            <div className="flex items-center gap-2 px-3 py-2 flex-wrap">
               <button
-                onClick={() => { toggleChat(); setShowMenu(false); }}
-                className="relative px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-gray-300 text-xs flex items-center gap-1.5 font-semibold"
+                onClick={() => setShowVoice(v => !v)}
+                className={`px-3 py-1 rounded-lg border text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                  showVoice
+                    ? "bg-emerald-600/30 border-emerald-500/50 text-emerald-400"
+                    : "bg-white/5 border-white/10 text-gray-300"
+                }`}
               >
-                💬 Chat
-                {hasNewMessages && (
-                  <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-                )}
+                🎙️ Voice
               </button>
-              <span className="text-gray-500 text-xs flex-1">{username}</span>
+              <button
+                onClick={() => { setShowScoreboard(true); setShowMenu(false); }}
+                className="px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-gray-300 text-xs font-semibold"
+              >
+                📊 Scores
+              </button>
+              <span className="text-gray-500 text-xs">{username}</span>
               {isHost && state.status !== "finished" && (
                 <button
                   onClick={() => { setShowEndConfirm(true); setShowMenu(false); }}
-                  className="text-xs text-red-400 border border-red-400/30 px-3 py-1 rounded-lg"
+                  className="text-xs text-red-400 border border-red-400/30 px-3 py-1 rounded-lg ml-auto"
                 >
                   End Game
                 </button>
@@ -257,6 +273,14 @@ export default function GameBoard({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── Single always-mounted VoiceChat panel ───────────────────────────── */}
+      <div
+        className="shrink-0 px-3 py-2 bg-black/50 border-b border-white/5 z-10"
+        style={{ display: showVoice ? "block" : "none" }}
+      >
+        <VoiceChat gameCode={gameCode} username={username} />
+      </div>
 
       {/* ── Error toast ───────────────────────────────────────────────────────── */}
       <AnimatePresence>

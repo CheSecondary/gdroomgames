@@ -81,13 +81,11 @@ class GameConsumer(AsyncWebsocketConsumer):
         chosen = game.max_rounds
         max_r  = min(chosen, actual_max) if chosen > 0 else actual_max
 
-        # Assign teams if enabled
-        teams = []
-        if game.teams_enabled and len(players) >= 4 and len(players) % 2 == 0:
-            seats = [p.seat for p in players]
-            teams = engine.assign_teams(seats)
+        # Assign teams only if enabled AND player count is valid (even, ≥ 4)
+        teams_valid = game.teams_enabled and len(players) >= 4 and len(players) % 2 == 0
+        teams = engine.assign_teams([p.seat for p in players]) if teams_valid else []
 
-        await self.db_start_game(game, max_r, teams)
+        await self.db_start_game(game, max_r, teams, teams_enabled=teams_valid)
         await self.start_new_round(game)
 
     async def handle_place_bid(self, data):
@@ -571,11 +569,13 @@ class GameConsumer(AsyncWebsocketConsumer):
         game.delete()
 
     @database_sync_to_async
-    def db_start_game(self, game, max_r, teams):
+    def db_start_game(self, game, max_r, teams, teams_enabled=None):
         game.status        = Game.STATUS_BIDDING
         game.current_round = game.start_round
         game.max_rounds    = max_r
         game.teams         = teams
+        if teams_enabled is not None:
+            game.teams_enabled = teams_enabled
         game.save()
 
     @database_sync_to_async
