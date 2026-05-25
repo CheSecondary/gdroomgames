@@ -8,7 +8,7 @@ import RoundSummary from "./RoundSummary";
 import VoiceChat from "./VoiceChat";
 import type { GameState, Card as CardType, RoundScore } from "@/lib/types";
 import { TEAM_COLORS } from "@/lib/types";
-import type { ChatMessage } from "@/lib/useGameSocket";
+import type { ChatMessage, PeekStatus } from "@/lib/useGameSocket";
 
 interface Props {
   state: GameState;
@@ -25,6 +25,14 @@ interface Props {
   onEndGame: () => void;
   onExtendGame: () => void;
   onFinishGame: () => void;
+  // Spectator/peek mode
+  isSpectator?: boolean;
+  spectateSeat?: number;
+  peekStatus?: PeekStatus;
+  peekRequest?: { spectator: string; targetSeat: number } | null;
+  onRequestPeek?: (targetSeat: number) => void;
+  onAcceptPeek?: (spectator: string) => void;
+  onDeclinePeek?: (spectator: string) => void;
 }
 
 const SUIT_ORDER: Record<string, number> = { spades: 0, hearts: 1, diamonds: 2, clubs: 3 };
@@ -51,6 +59,13 @@ export default function GameBoard({
   onEndGame,
   onExtendGame,
   onFinishGame,
+  isSpectator = false,
+  spectateSeat,
+  peekStatus = "idle",
+  peekRequest,
+  onRequestPeek,
+  onAcceptPeek,
+  onDeclinePeek,
 }: Props) {
   const [selectedCard,   setSelectedCard]   = useState<string | null>(null);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
@@ -90,8 +105,13 @@ export default function GameBoard({
   };
 
   const me       = state.players.find((p) => p.username === username);
-  const myTurn   = !!me && state.players[state.current_player_index]?.username === username;
-  const isHost   = state.host_username === username;
+  // For spectators, display the peeked player's hand instead
+  const peekedPlayer = isSpectator && peekStatus === "accepted"
+    ? state.players.find((p) => p.seat === spectateSeat) ?? null
+    : null;
+  const displayedPlayer = isSpectator ? peekedPlayer : me;
+  const myTurn   = !isSpectator && !!me && state.players[state.current_player_index]?.username === username;
+  const isHost   = !isSpectator && state.host_username === username;
 
   const cardKey = (c: CardType) => `${c.suit}-${c.rank}-${c.deck_id}`;
 
@@ -102,7 +122,7 @@ export default function GameBoard({
     else                      { setSelectedCard(key); }
   };
 
-  const myHand     = (me?.hand ?? []).filter((c) => !c.hidden);
+  const myHand     = (displayedPlayer?.hand ?? []).filter((c) => !c.hidden);
   const sortedHand = [...myHand].sort(
     (a, b) => SUIT_ORDER[a.suit] - SUIT_ORDER[b.suit] || RANK_VAL[a.rank] - RANK_VAL[b.rank]
   );
@@ -112,7 +132,7 @@ export default function GameBoard({
   const captain    = state.teams_enabled && myTeam
     ? state.players.find((p) => p.seat === myTeam[0])
     : null;
-  const iAmCaptain = !state.teams_enabled || (me?.is_captain ?? true);
+  const iAmCaptain = !isSpectator && (!state.teams_enabled || (me?.is_captain ?? true));
   const activeBidder = state.status === "bidding"
     ? state.players[state.current_player_index]
     : null;
@@ -296,8 +316,93 @@ export default function GameBoard({
         )}
       </AnimatePresence>
 
+      {/* ── Peek request toast (shown to target player) ───────────────────────── */}
+      <AnimatePresence>
+        {peekRequest && me && me.seat === peekRequest.targetSeat && onAcceptPeek && onDeclinePeek && (
+          <motion.div
+            initial={{ y: -30, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -30, opacity: 0 }}
+            className="fixed top-14 left-1/2 -translate-x-1/2 z-50 bg-gray-900 border border-yellow-400/30 rounded-2xl px-4 py-3 shadow-2xl text-center w-72"
+          >
+            <p className="text-white text-sm font-semibold mb-1">
+              👁️ <span className="text-yellow-400">{peekRequest.spectator}</span> wants to watch you
+            </p>
+            <p className="text-gray-400 text-xs mb-3">They&apos;ll only see your hand — not others</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onDeclinePeek(peekRequest.spectator)}
+                className="flex-1 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-sm font-semibold transition-all border border-white/10"
+              >
+                Decline
+              </button>
+              <button
+                onClick={() => onAcceptPeek(peekRequest.spectator)}
+                className="flex-1 py-1.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-gray-900 text-sm font-bold transition-all"
+              >
+                Allow
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Spectator pending / declined overlay ─────────────────────────────── */}
+      {isSpectator && peekStatus !== "accepted" && (
+        <div className="flex-1 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-gray-900 border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center"
+          >
+            {peekStatus === "idle" || peekStatus === "pending" ? (
+              <>
+                <p className="text-4xl mb-3">👁️</p>
+                <h2 className="text-white font-bold text-lg mb-2">
+                  {peekStatus === "idle" ? "Requesting peek…" : "Waiting for approval"}
+                </h2>
+                <p className="text-gray-400 text-sm mb-4">
+                  {peekedPlayer
+                    ? `Waiting for ${state.players.find(p => p.seat === spectateSeat)?.username ?? "player"} to accept.`
+                    : "Sending peek request…"
+                  }
+                </p>
+                <div className="flex justify-center">
+                  <div className="w-6 h-6 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-4xl mb-3">🚫</p>
+                <h2 className="text-white font-bold text-lg mb-2">Request Declined</h2>
+                <p className="text-gray-400 text-sm mb-5">
+                  The player declined your peek request. You can ask again.
+                </p>
+                {onRequestPeek && spectateSeat !== undefined && (
+                  <button
+                    onClick={() => onRequestPeek(spectateSeat)}
+                    className="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2.5 rounded-xl transition-all"
+                  >
+                    Ask Again
+                  </button>
+                )}
+              </>
+            )}
+          </motion.div>
+        </div>
+      )}
+
+      {/* ── Spectator banner (when accepted) ─────────────────────────────────── */}
+      {isSpectator && peekStatus === "accepted" && (
+        <div className="shrink-0 bg-yellow-400/10 border-b border-yellow-400/20 px-3 py-1 text-center">
+          <span className="text-yellow-400 text-[11px] font-semibold">
+            👁️ Spectating {state.players.find(p => p.seat === spectateSeat)?.username ?? "player"} — view only
+          </span>
+        </div>
+      )}
+
       {/* ── Main content ─────────────────────────────────────────────────────── */}
-      {state.status === "prompt" ? (
+      {(!isSpectator || peekStatus === "accepted") && (state.status === "prompt" ? (
         <div className="flex-1 flex items-center justify-center p-4">
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
@@ -369,13 +474,16 @@ export default function GameBoard({
               {/* Hand header */}
               <div className="flex items-center justify-between mb-1.5 shrink-0">
                 <span className="text-gray-400 text-[11px] font-semibold">
-                  Your hand
+                  {isSpectator
+                    ? <span>👁️ <span className="text-yellow-400">{displayedPlayer?.username}</span>'s hand</span>
+                    : <>Your hand</>
+                  }
                   <span className="text-gray-600 ml-1">({myHand.length})</span>
                 </span>
-                {me && me.bid >= 0 && (
+                {displayedPlayer && displayedPlayer.bid >= 0 && (
                   <span className="text-[11px] text-gray-400">
-                    Bid <span className="text-yellow-400 font-bold">{me.bid}</span>
-                    {" "}· Won <span className="text-emerald-400 font-bold">{me.tricks_won}</span>
+                    Bid <span className="text-yellow-400 font-bold">{displayedPlayer.bid}</span>
+                    {" "}· Won <span className="text-emerald-400 font-bold">{displayedPlayer.tricks_won}</span>
                   </span>
                 )}
               </div>
@@ -488,7 +596,7 @@ export default function GameBoard({
             />
           </div>
         </div>
-      )}
+      ))}
 
       {/* ── Scoreboard modal ──────────────────────────────────────────────────── */}
       <AnimatePresence>
@@ -610,8 +718,11 @@ export default function GameBoard({
                   const isMe = msg.username === username;
                   return (
                     <div key={msg.id} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
-                      <span className="text-[10px] text-gray-500 mb-0.5">{msg.username}</span>
-                      <div className={`rounded-xl px-3 py-1.5 max-w-[85%] break-words leading-relaxed ${isMe ? "bg-yellow-400 text-gray-900 font-medium shadow-md shadow-yellow-400/10" : "bg-white/10 text-white"}`}>
+                      <span className="text-[10px] text-gray-500 mb-0.5">
+                        {msg.isSpectator && <span className="text-yellow-600 mr-0.5">👁️</span>}
+                        {msg.username}
+                      </span>
+                      <div className={`rounded-xl px-3 py-1.5 max-w-[85%] break-words leading-relaxed ${isMe ? "bg-yellow-400 text-gray-900 font-medium shadow-md shadow-yellow-400/10" : msg.isSpectator ? "bg-yellow-400/10 text-yellow-200 border border-yellow-400/20" : "bg-white/10 text-white"}`}>
                         {msg.message}
                       </div>
                     </div>

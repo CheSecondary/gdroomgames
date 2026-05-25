@@ -71,7 +71,12 @@ class JoinGameView(APIView):
             return Response(GameSerializer(game).data)
 
         if game.status != Game.STATUS_WAITING:
-            return Response({"error": "Game has already started."}, status=400)
+            players = list(game.players.order_by("seat").values("seat", "username"))
+            return Response({
+                "game_started": True,
+                "game_code": game.code,
+                "players": players,
+            })
 
         if game.players.count() >= game.expected_players:
             return Response({"error": f"Room is full (max {game.expected_players} players)."}, status=400)

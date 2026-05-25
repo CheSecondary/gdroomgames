@@ -31,6 +31,13 @@ export interface TrickCard {
 
 export type GameStatus = "waiting" | "bidding" | "playing" | "finished" | "prompt";
 
+export interface SpectatorInfo {
+  username: string;
+  target_seat: number | null;
+  peek_accepted: boolean;
+  is_connected: boolean;
+}
+
 export interface GameState {
   type: "state";
   game_code: string;
@@ -45,6 +52,7 @@ export interface GameState {
   round_bid_lead_seat: number;
   round_play_lead_seat: number;
   num_decks: number;
+  spectators: SpectatorInfo[];
   expected_players: number;
   teams_enabled: boolean;
   teams: number[][];        // [[captain_seat, teammate_seat], ...]

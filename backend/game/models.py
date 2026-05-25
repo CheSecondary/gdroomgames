@@ -98,3 +98,19 @@ class TrickCard(models.Model):
 
     class Meta:
         ordering = ["play_order"]
+
+
+class Spectator(models.Model):
+    game          = models.ForeignKey(Game, on_delete=models.CASCADE, related_name="spectators")
+    username      = models.CharField(max_length=50)
+    target_player = models.ForeignKey(
+        Player, on_delete=models.SET_NULL, null=True, blank=True, related_name="spectators"
+    )
+    peek_accepted = models.BooleanField(default=False)
+    is_connected  = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = [("game", "username")]
+
+    def __str__(self):
+        return f"Spectator {self.username} in {self.game.code}"

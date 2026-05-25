@@ -9,9 +9,12 @@ export interface ChatMessage {
   username: string;
   message: string;
   timestamp: Date;
+  isSpectator?: boolean;
 }
 
-export function useGameSocket(gameCode: string, username: string) {
+export type PeekStatus = "idle" | "pending" | "accepted" | "declined";
+
+export function useGameSocket(gameCode: string, username: string, spectateSeat?: number) {
   const ws = useRef<WebSocket | null>(null);
   const [state, setState] = useState<GameState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,6 +22,9 @@ export function useGameSocket(gameCode: string, username: string) {
   const [roundSummary, setRoundSummary] = useState<{ round: number; scores: RoundScore[] } | null>(null);
   const [trickWinner, setTrickWinner] = useState<{ winner: string; seat: number } | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [peekStatus, setPeekStatus] = useState<PeekStatus>("idle");
+  // Incoming peek request (for target player to see)
+  const [peekRequest, setPeekRequest] = useState<{ spectator: string; targetSeat: number } | null>(null);
 
   useEffect(() => {
     if (!username) return;
@@ -26,7 +32,8 @@ export function useGameSocket(gameCode: string, username: string) {
     let timeout: NodeJS.Timeout;
 
     const connect = () => {
-      const url = `${WS_BASE}/ws/game/${gameCode}/?username=${encodeURIComponent(username)}`;
+      const spectateParam = spectateSeat !== undefined ? `&spectate=${spectateSeat}` : "";
+      const url = `${WS_BASE}/ws/game/${gameCode}/?username=${encodeURIComponent(username)}${spectateParam}`;
       socket = new WebSocket(url);
       ws.current = socket;
 
@@ -60,8 +67,15 @@ export function useGameSocket(gameCode: string, username: string) {
               username: msg.username,
               message: msg.message,
               timestamp: new Date(),
+              isSpectator: msg.is_spectator ?? false,
             },
           ]);
+        } else if (msg.type === "peek_requested") {
+          setPeekRequest({ spectator: msg.spectator, targetSeat: msg.target_seat });
+        } else if (msg.type === "peek_response") {
+          if (msg.spectator === username) {
+            setPeekStatus(msg.accepted ? "accepted" : "declined");
+          }
         } else if (msg.type === "game_cancelled") {
           window.location.href = "/lobby";
         }
@@ -87,7 +101,7 @@ export function useGameSocket(gameCode: string, username: string) {
         socket.close();
       }
     };
-  }, [gameCode, username]);
+  }, [gameCode, username, spectateSeat]);
 
   const send = useCallback((data: object) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
@@ -104,6 +118,18 @@ export function useGameSocket(gameCode: string, username: string) {
   const sendChat     = useCallback((message: string) => send({ action: "send_chat", message }), [send]);
   const extendGame   = useCallback(() => send({ action: "extend_game" }), [send]);
   const finishGame   = useCallback(() => send({ action: "finish_game" }), [send]);
+  const requestPeek  = useCallback((targetSeat: number) => {
+    setPeekStatus("pending");
+    send({ action: "request_peek", target_seat: targetSeat });
+  }, [send]);
+  const acceptPeek   = useCallback((spectator: string) => {
+    send({ action: "accept_peek", spectator });
+    setPeekRequest(null);
+  }, [send]);
+  const declinePeek  = useCallback((spectator: string) => {
+    send({ action: "decline_peek", spectator });
+    setPeekRequest(null);
+  }, [send]);
 
   return {
     state,
@@ -112,6 +138,8 @@ export function useGameSocket(gameCode: string, username: string) {
     roundSummary,
     trickWinner,
     chatMessages,
+    peekStatus,
+    peekRequest,
     clearSummary,
     startGame,
     cancelGame,
@@ -121,5 +149,8 @@ export function useGameSocket(gameCode: string, username: string) {
     sendChat,
     extendGame,
     finishGame,
+    requestPeek,
+    acceptPeek,
+    declinePeek,
   };
 }

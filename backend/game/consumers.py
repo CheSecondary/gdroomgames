@@ -2,7 +2,7 @@ import json
 from urllib.parse import parse_qs
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from .models import Game, Player, Round, Trick, TrickCard
+from .models import Game, Player, Round, Trick, TrickCard, Spectator
 from . import engine
 
 
@@ -38,28 +38,35 @@ class GameConsumer(AsyncWebsocketConsumer):
         self.room_group = f"game_{self.game_code}"
         qs = parse_qs(self.scope.get("query_string", b"").decode())
         self.username   = (qs.get("username", ["Anonymous"])[0])[:50].strip() or "Anonymous"
+        spectate_seat   = qs.get("spectate", [None])[0]
 
         await self.channel_layer.group_add(self.room_group, self.channel_name)
         await self.accept()
-        await self.set_player_connected(True)
+
+        # Determine if this connection is a spectator (game started + not a player)
+        self.is_spec = await self.detect_spectator(spectate_seat)
+        await self.set_connected(True)
         await self.broadcast_state()
 
     async def disconnect(self, code):
-        await self.set_player_connected(False)
+        await self.set_connected(False)
         await self.channel_layer.group_discard(self.room_group, self.channel_name)
         await self.broadcast_state()
 
     async def receive(self, text_data):
         data = json.loads(text_data)
         handlers = {
-            "start_game": self.handle_start_game,
-            "place_bid":  self.handle_place_bid,
-            "play_card":  self.handle_play_card,
-            "end_game":   self.handle_end_game,
-            "cancel_game": self.handle_cancel_game,
-            "send_chat":   self.handle_send_chat,
-            "extend_game": self.handle_extend_game,
-            "finish_game": self.handle_finish_game,
+            "start_game":    self.handle_start_game,
+            "place_bid":     self.handle_place_bid,
+            "play_card":     self.handle_play_card,
+            "end_game":      self.handle_end_game,
+            "cancel_game":   self.handle_cancel_game,
+            "send_chat":     self.handle_send_chat,
+            "extend_game":   self.handle_extend_game,
+            "finish_game":   self.handle_finish_game,
+            "request_peek":  self.handle_request_peek,
+            "accept_peek":   self.handle_accept_peek,
+            "decline_peek":  self.handle_decline_peek,
         }
         handler = handlers.get(data.get("action"))
         if handler:
@@ -160,6 +167,65 @@ class GameConsumer(AsyncWebsocketConsumer):
                 "type": "chat_message_msg",
                 "username": self.username,
                 "message": message,
+                "is_spectator": self.is_spec,
+            }
+        )
+
+    async def handle_request_peek(self, data):
+        if not self.is_spec:
+            return
+        target_seat = data.get("target_seat")
+        if target_seat is None:
+            return
+        spec = await self.db_get_or_create_spectator()
+        target = await self.db_get_player_by_seat(target_seat)
+        if target is None:
+            return
+        await self.db_update_spectator(spec, target_player=target, peek_accepted=False)
+        # Notify only the target player's client
+        await self.channel_layer.group_send(
+            self.room_group,
+            {
+                "type": "peek_requested_msg",
+                "spectator": self.username,
+                "target_seat": target_seat,
+                "target_username": target.username,
+            }
+        )
+
+    async def handle_accept_peek(self, data):
+        spectator_username = data.get("spectator")
+        if not spectator_username:
+            return
+        spec = await self.db_get_spectator_by_username(spectator_username)
+        if spec is None:
+            return
+        await self.db_update_spectator(spec, peek_accepted=True)
+        await self.channel_layer.group_send(
+            self.room_group,
+            {
+                "type": "peek_response_msg",
+                "spectator": spectator_username,
+                "accepted": True,
+                "target_seat": spec.target_player.seat if spec.target_player else None,
+            }
+        )
+
+    async def handle_decline_peek(self, data):
+        spectator_username = data.get("spectator")
+        if not spectator_username:
+            return
+        spec = await self.db_get_spectator_by_username(spectator_username)
+        if spec is None:
+            return
+        await self.db_update_spectator(spec, peek_accepted=False, target_player=None)
+        await self.channel_layer.group_send(
+            self.room_group,
+            {
+                "type": "peek_response_msg",
+                "spectator": spectator_username,
+                "accepted": False,
+                "target_seat": None,
             }
         )
 
@@ -423,6 +489,23 @@ class GameConsumer(AsyncWebsocketConsumer):
             "type": "chat_message",
             "username": event["username"],
             "message": event["message"],
+            "is_spectator": event.get("is_spectator", False),
+        }))
+
+    async def peek_requested_msg(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "peek_requested",
+            "spectator": event["spectator"],
+            "target_seat": event["target_seat"],
+            "target_username": event["target_username"],
+        }))
+
+    async def peek_response_msg(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "peek_response",
+            "spectator": event["spectator"],
+            "accepted": event["accepted"],
+            "target_seat": event["target_seat"],
         }))
 
     async def send_error(self, message):
@@ -495,6 +578,16 @@ class GameConsumer(AsyncWebsocketConsumer):
             round_bid_lead_seat  = game.lead_player_index
             round_play_lead_seat = (game.lead_player_index + 1) % n if n > 1 else game.lead_player_index
 
+        spectators_state = [
+            {
+                "username":      s.username,
+                "target_seat":   s.target_player.seat if s.target_player else None,
+                "peek_accepted": s.peek_accepted,
+                "is_connected":  s.is_connected,
+            }
+            for s in game.spectators.select_related("target_player").all()
+        ]
+
         return {
             "game_code":      game.code,
             "host_username":  game.host_username,
@@ -513,6 +606,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             "teams":          game.teams,          # [[captain_seat, teammate_seat], ...]
             "players":        players_state,
             "current_trick":  trick_cards,
+            "spectators":     spectators_state,
         }
 
     # ── DB helpers ────────────────────────────────────────────────────────────
@@ -559,10 +653,38 @@ class GameConsumer(AsyncWebsocketConsumer):
         return Player.objects.get(id=player_id).seat
 
     @database_sync_to_async
-    def set_player_connected(self, connected):
-        Player.objects.filter(
-            game__code=self.game_code, username=self.username
-        ).update(is_connected=connected)
+    def detect_spectator(self, spectate_seat):
+        """Return True and register/update spectator row if this user is not a player in a started game."""
+        try:
+            game = Game.objects.get(code=self.game_code)
+        except Game.DoesNotExist:
+            return False
+        is_player = game.players.filter(username=self.username).exists()
+        if is_player:
+            return False
+        if game.status == Game.STATUS_WAITING:
+            return False
+        # Upsert spectator row
+        spec, _ = Spectator.objects.get_or_create(game=game, username=self.username)
+        if spectate_seat is not None:
+            try:
+                target = game.players.get(seat=int(spectate_seat))
+                spec.target_player = target
+                spec.save()
+            except (Player.DoesNotExist, ValueError):
+                pass
+        return True
+
+    @database_sync_to_async
+    def set_connected(self, connected):
+        if self.is_spec:
+            Spectator.objects.filter(
+                game__code=self.game_code, username=self.username
+            ).update(is_connected=connected)
+        else:
+            Player.objects.filter(
+                game__code=self.game_code, username=self.username
+            ).update(is_connected=connected)
 
     @database_sync_to_async
     def db_delete_game(self, game):
@@ -664,3 +786,31 @@ class GameConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def db_complete_current_round(self, game):
         game.rounds.filter(is_complete=False).update(is_complete=True)
+
+    @database_sync_to_async
+    def db_get_or_create_spectator(self):
+        game = Game.objects.get(code=self.game_code)
+        spec, _ = Spectator.objects.get_or_create(game=game, username=self.username)
+        return spec
+
+    @database_sync_to_async
+    def db_get_spectator_by_username(self, username):
+        try:
+            return Spectator.objects.select_related("target_player").get(
+                game__code=self.game_code, username=username
+            )
+        except Spectator.DoesNotExist:
+            return None
+
+    @database_sync_to_async
+    def db_get_player_by_seat(self, seat):
+        try:
+            return Player.objects.get(game__code=self.game_code, seat=int(seat))
+        except (Player.DoesNotExist, ValueError):
+            return None
+
+    @database_sync_to_async
+    def db_update_spectator(self, spec, **kwargs):
+        for k, v in kwargs.items():
+            setattr(spec, k, v)
+        spec.save()

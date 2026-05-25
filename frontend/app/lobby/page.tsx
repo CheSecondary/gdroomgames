@@ -6,6 +6,11 @@ import { api } from "@/lib/api";
 
 type Tab = "create" | "join";
 
+interface PlayerOption {
+  seat: number;
+  username: string;
+}
+
 export default function LobbyPage() {
   const router   = useRouter();
   const [username, setUsername] = useState<string | null>(null);
@@ -18,6 +23,9 @@ export default function LobbyPage() {
 
   // Join form
   const [joinCode, setJoinCode] = useState("");
+
+  // Spectator player picker (shown when joining a started game)
+  const [spectateGame, setSpectateGame] = useState<{ code: string; players: PlayerOption[] } | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState("");
@@ -69,10 +77,20 @@ export default function LobbyPage() {
     if (!username) return;
     setError(""); setLoading(true);
     try {
-      const game = await api.joinGame(username, joinCode.trim().toUpperCase());
-      router.push(`/game/${game.code}`);
+      const data = await api.joinGame(username, joinCode.trim().toUpperCase());
+      if ((data as any).game_started) {
+        // Game already started — show spectator player picker
+        setSpectateGame({ code: (data as any).game_code, players: (data as any).players });
+      } else {
+        router.push(`/game/${(data as any).code}`);
+      }
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
+  }
+
+  function spectatePlayer(seat: number) {
+    if (!spectateGame) return;
+    router.push(`/game/${spectateGame.code}?spectate=${seat}`);
   }
 
   return (
@@ -295,6 +313,47 @@ export default function LobbyPage() {
       >
         ← Change name
       </button>
+
+      {/* Spectator player picker overlay */}
+      <AnimatePresence>
+        {spectateGame && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 flex items-center justify-center bg-black/70 z-50 p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="bg-gray-900 border border-white/10 rounded-2xl p-6 w-full max-w-sm shadow-2xl"
+            >
+              <h2 className="text-white font-bold text-lg mb-1">Game already started</h2>
+              <p className="text-gray-400 text-sm mb-5">
+                Pick a player to watch. They&apos;ll need to accept your peek request.
+              </p>
+              <div className="flex flex-col gap-2">
+                {spectateGame.players.map((p) => (
+                  <button
+                    key={p.seat}
+                    onClick={() => spectatePlayer(p.seat)}
+                    className="flex items-center gap-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-4 py-3 text-left transition-all"
+                  >
+                    <span className="text-gray-500 font-mono text-xs">#{p.seat + 1}</span>
+                    <span className="text-white font-semibold">{p.username}</span>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setSpectateGame(null)}
+                className="w-full mt-4 text-gray-500 hover:text-gray-300 text-sm transition-colors"
+              >
+                Cancel
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

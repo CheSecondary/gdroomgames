@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { useGameSocket } from "@/lib/useGameSocket";
 import WaitingRoom from "@/components/WaitingRoom";
@@ -9,7 +9,10 @@ import GameBoard from "@/components/GameBoard";
 export default function GamePage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const code   = (params?.code as string ?? "").toUpperCase();
+  const spectateParam = searchParams?.get("spectate");
+  const spectateSeat  = spectateParam !== null ? Number(spectateParam) : undefined;
 
   const [username, setUsername] = useState<string | null>(null);
   const [ready,    setReady]    = useState(false);
@@ -19,17 +22,31 @@ export default function GamePage() {
     if (!saved) { router.push("/"); return; }
     setUsername(saved);
 
-    // joinGame is idempotent — if already in game (any status) it just returns the game
-    api.joinGame(saved, code).catch(() => {}).finally(() => setReady(true));
-  }, [code, router]);
+    if (spectateSeat !== undefined) {
+      // Spectator — don't join as player, just mark ready
+      setReady(true);
+    } else {
+      // joinGame is idempotent — if already in game (any status) it just returns the game
+      api.joinGame(saved, code).catch(() => {}).finally(() => setReady(true));
+    }
+  }, [code, router, spectateSeat]);
 
   const {
     state, error, connected, roundSummary, trickWinner, clearSummary,
     startGame, cancelGame, placeBid, playCard, endGame, chatMessages, sendChat,
-    extendGame, finishGame,
-  } = useGameSocket(code, username ?? "");
+    extendGame, finishGame, peekStatus, peekRequest, requestPeek, acceptPeek, declinePeek,
+  } = useGameSocket(code, username ?? "", spectateSeat);
 
-  // ── Loading states ────────────────────────────────────────────────ân
+  // Auto-send peek request once we connect as a spectator and state is received
+  useEffect(() => {
+    if (spectateSeat !== undefined && state && peekStatus === "idle") {
+      requestPeek(spectateSeat);
+    }
+  // Only run once when state first arrives
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state !== null, spectateSeat]);
+
+  // ── Loading states ────────────────────────────────────────────────
   if (!ready || !username) {
     return <Spinner />;
   }
@@ -84,6 +101,13 @@ export default function GamePage() {
       onEndGame={endGame}
       onExtendGame={extendGame}
       onFinishGame={finishGame}
+      isSpectator={spectateSeat !== undefined}
+      spectateSeat={spectateSeat}
+      peekStatus={peekStatus}
+      peekRequest={peekRequest}
+      onRequestPeek={requestPeek}
+      onAcceptPeek={acceptPeek}
+      onDeclinePeek={declinePeek}
     />
   );
 }
