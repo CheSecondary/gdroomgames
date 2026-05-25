@@ -375,17 +375,31 @@ export default function GameBoard({
               <>
                 <p className="text-4xl mb-3">🚫</p>
                 <h2 className="text-white font-bold text-lg mb-2">Request Declined</h2>
-                <p className="text-gray-400 text-sm mb-5">
-                  The player declined your peek request. You can ask again.
+                <p className="text-gray-400 text-sm mb-4">
+                  Pick any player to send a peek request to.
                 </p>
-                {onRequestPeek && spectateSeat !== undefined && (
-                  <button
-                    onClick={() => onRequestPeek(spectateSeat)}
-                    className="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2.5 rounded-xl transition-all"
-                  >
-                    Ask Again
-                  </button>
-                )}
+                <div className="flex flex-col gap-2">
+                  {state.players.map((p) => {
+                    const wasDeclined = p.seat === spectateSeat;
+                    return (
+                      <button
+                        key={p.seat}
+                        onClick={() => onRequestPeek?.(p.seat)}
+                        className={`flex items-center gap-3 rounded-xl px-4 py-2.5 text-left transition-all border ${
+                          wasDeclined
+                            ? "bg-red-500/10 border-red-400/20 hover:bg-red-500/20"
+                            : "bg-white/5 border-white/10 hover:bg-white/10"
+                        }`}
+                      >
+                        <span className="text-gray-500 font-mono text-xs">#{p.seat + 1}</span>
+                        <span className="text-white font-semibold flex-1">{p.username}</span>
+                        {wasDeclined && (
+                          <span className="text-red-400 text-[10px]">declined</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               </>
             )}
           </motion.div>
