@@ -8,7 +8,7 @@ import RoundSummary from "./RoundSummary";
 import VoiceChat from "./VoiceChat";
 import type { GameState, Card as CardType, RoundScore } from "@/lib/types";
 import { TEAM_COLORS } from "@/lib/types";
-import type { ChatMessage, PeekStatus } from "@/lib/useGameSocket";
+import type { ChatMessage, PeekStatus, TakeoverStatus } from "@/lib/useGameSocket";
 
 interface Props {
   state: GameState;
@@ -33,6 +33,15 @@ interface Props {
   onRequestPeek?: (targetSeat: number) => void;
   onAcceptPeek?: (spectator: string) => void;
   onDeclinePeek?: (spectator: string) => void;
+  // Ownership takeover mode
+  isTakeover?: boolean;
+  takeoverSeat?: number;
+  takeoverStatus?: TakeoverStatus;
+  takeoverRequest?: { requester: string; targetSeat: number } | null;
+  handedOff?: { to: string; from: string; seat: number } | null;
+  onRequestTakeover?: (targetSeat: number) => void;
+  onAcceptTakeover?: (requester: string) => void;
+  onDeclineTakeover?: (requester: string) => void;
 }
 
 const SUIT_ORDER: Record<string, number> = { spades: 0, hearts: 1, diamonds: 2, clubs: 3 };
@@ -66,7 +75,16 @@ export default function GameBoard({
   onRequestPeek,
   onAcceptPeek,
   onDeclinePeek,
+  isTakeover = false,
+  takeoverSeat,
+  takeoverStatus = "idle",
+  takeoverRequest,
+  handedOff,
+  onRequestTakeover,
+  onAcceptTakeover,
+  onDeclineTakeover,
 }: Props) {
+  const [ownershipToast, setOwnershipToast] = useState<string | null>(null);
   const [selectedCard,   setSelectedCard]   = useState<string | null>(null);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showMenu,       setShowMenu]       = useState(false);
@@ -77,6 +95,15 @@ export default function GameBoard({
   const [chatInput, setChatInput] = useState("");
   const [lastReadCount, setLastReadCount] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Show brief ownership toast to ALL players when any transfer happens
+  useEffect(() => {
+    if (handedOff) {
+      setOwnershipToast(`🔑 ${handedOff.from} → ${handedOff.to}`);
+      const t = setTimeout(() => setOwnershipToast(null), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [handedOff?.from, handedOff?.to]);
 
   const toggleChat = () => {
     setShowChat(!showChat);
@@ -347,6 +374,125 @@ export default function GameBoard({
         )}
       </AnimatePresence>
 
+      {/* ── Ownership transfer toast (all players) ───────────────────────────── */}
+      <AnimatePresence>
+        {ownershipToast && (
+          <motion.div
+            initial={{ y: -24, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -24, opacity: 0 }}
+            className="fixed top-14 left-1/2 -translate-x-1/2 z-50 bg-gray-900 border border-yellow-400/40 text-yellow-300 text-xs font-semibold px-4 py-2 rounded-full shadow-xl"
+          >
+            {ownershipToast}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Takeover request toast (shown to target player) ───────────────────── */}
+      <AnimatePresence>
+        {takeoverRequest && me && me.seat === takeoverRequest.targetSeat && onAcceptTakeover && onDeclineTakeover && (
+          <motion.div
+            initial={{ y: -30, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -30, opacity: 0 }}
+            className="fixed top-14 left-1/2 -translate-x-1/2 z-50 bg-gray-900 border border-yellow-400/30 rounded-2xl px-4 py-3 shadow-2xl text-center w-72"
+          >
+            <p className="text-white text-sm font-semibold mb-1">
+              🔑 <span className="text-yellow-400">{takeoverRequest.requester}</span> wants to take over your seat
+            </p>
+            <p className="text-gray-400 text-xs mb-3">They&apos;ll play on your behalf — you&apos;ll be removed</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onDeclineTakeover(takeoverRequest.requester)}
+                className="flex-1 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-sm font-semibold transition-all border border-white/10"
+              >
+                Decline
+              </button>
+              <button
+                onClick={() => onAcceptTakeover(takeoverRequest.requester)}
+                className="flex-1 py-1.5 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-gray-900 text-sm font-bold transition-all"
+              >
+                Hand Off
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Handed-off screen (original owner after transfer) ────────────────── */}
+      {handedOff && handedOff.from === username && (
+        <div className="fixed inset-0 bg-gray-950/95 flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-gray-900 border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center"
+          >
+            <p className="text-4xl mb-3">🔑</p>
+            <h2 className="text-white font-bold text-lg mb-2">Seat handed off</h2>
+            <p className="text-gray-400 text-sm mb-5">
+              <span className="text-yellow-400 font-semibold">{handedOff.to}</span> is now playing on your behalf.
+              You can safely close this tab.
+            </p>
+            <button
+              onClick={() => { window.location.href = "/lobby"; }}
+              className="w-full bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 font-semibold py-2.5 rounded-xl transition-all"
+            >
+              ← Back to lobby
+            </button>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ── Takeover pending / declined overlay ──────────────────────────────── */}
+      {isTakeover && takeoverStatus !== "idle" && (
+        <div className="flex-1 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-gray-900 border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center"
+          >
+            {takeoverStatus === "pending" ? (
+              <>
+                <p className="text-4xl mb-3">🔑</p>
+                <h2 className="text-white font-bold text-lg mb-2">Waiting for approval</h2>
+                <p className="text-gray-400 text-sm mb-4">
+                  Asking {state.players.find(p => p.seat === takeoverSeat)?.username ?? "player"} to hand off their seat…
+                </p>
+                <div className="flex justify-center">
+                  <div className="w-6 h-6 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" />
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-4xl mb-3">🚫</p>
+                <h2 className="text-white font-bold text-lg mb-2">Request Declined</h2>
+                <p className="text-gray-400 text-sm mb-4">Pick another player to request a takeover.</p>
+                <div className="flex flex-col gap-2">
+                  {state.players.map((p) => {
+                    const wasDeclined = p.seat === takeoverSeat;
+                    return (
+                      <button
+                        key={p.seat}
+                        onClick={() => onRequestTakeover?.(p.seat)}
+                        className={`flex items-center gap-3 rounded-xl px-4 py-2.5 text-left transition-all border ${
+                          wasDeclined
+                            ? "bg-red-500/10 border-red-400/20 hover:bg-red-500/20"
+                            : "bg-white/5 border-white/10 hover:bg-white/10"
+                        }`}
+                      >
+                        <span className="text-gray-500 font-mono text-xs">#{p.seat + 1}</span>
+                        <span className="text-white font-semibold flex-1">{p.username}</span>
+                        {wasDeclined && <span className="text-red-400 text-[10px]">declined</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </motion.div>
+        </div>
+      )}
+
       {/* ── Spectator pending / declined overlay ─────────────────────────────── */}
       {isSpectator && peekStatus !== "accepted" && (
         <div className="flex-1 flex items-center justify-center p-4">
@@ -416,7 +562,7 @@ export default function GameBoard({
       )}
 
       {/* ── Main content ─────────────────────────────────────────────────────── */}
-      {(!isSpectator || peekStatus === "accepted") && (state.status === "prompt" ? (
+      {(!isSpectator || peekStatus === "accepted") && (!isTakeover || takeoverStatus === "idle") && (!handedOff || handedOff.from !== username) && (state.status === "prompt" ? (
         <div className="flex-1 flex items-center justify-center p-4">
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}

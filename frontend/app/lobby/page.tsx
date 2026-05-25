@@ -93,6 +93,11 @@ export default function LobbyPage() {
     router.push(`/game/${spectateGame.code}?spectate=${seat}`);
   }
 
+  function takeoverPlayer(seat: number) {
+    if (!spectateGame) return;
+    router.push(`/game/${spectateGame.code}?takeover=${seat}`);
+  }
+
   return (
     <div
       className="min-h-screen flex flex-col items-center justify-center p-4"
@@ -330,18 +335,29 @@ export default function LobbyPage() {
             >
               <h2 className="text-white font-bold text-lg mb-1">Game already started</h2>
               <p className="text-gray-400 text-sm mb-5">
-                Pick a player to watch. They&apos;ll need to accept your peek request.
+                Pick a player — peek their cards or take over their seat.
               </p>
               <div className="flex flex-col gap-2">
                 {spectateGame.players.map((p) => (
-                  <button
+                  <div
                     key={p.seat}
-                    onClick={() => spectatePlayer(p.seat)}
-                    className="flex items-center gap-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-4 py-3 text-left transition-all"
+                    className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5"
                   >
-                    <span className="text-gray-500 font-mono text-xs">#{p.seat + 1}</span>
-                    <span className="text-white font-semibold">{p.username}</span>
-                  </button>
+                    <span className="text-gray-500 font-mono text-xs shrink-0">#{p.seat + 1}</span>
+                    <span className="text-white font-semibold flex-1">{p.username}</span>
+                    <button
+                      onClick={() => spectatePlayer(p.seat)}
+                      className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/15 border border-white/10 text-gray-300 text-xs font-semibold transition-all"
+                    >
+                      👁️ Peek
+                    </button>
+                    <button
+                      onClick={() => takeoverPlayer(p.seat)}
+                      className="px-2.5 py-1 rounded-lg bg-yellow-400/10 hover:bg-yellow-400/20 border border-yellow-400/30 text-yellow-300 text-xs font-semibold transition-all"
+                    >
+                      🔑 Take Over
+                    </button>
+                  </div>
                 ))}
               </div>
               <button

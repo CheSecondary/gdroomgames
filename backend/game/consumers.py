@@ -56,17 +56,20 @@ class GameConsumer(AsyncWebsocketConsumer):
     async def receive(self, text_data):
         data = json.loads(text_data)
         handlers = {
-            "start_game":    self.handle_start_game,
-            "place_bid":     self.handle_place_bid,
-            "play_card":     self.handle_play_card,
-            "end_game":      self.handle_end_game,
-            "cancel_game":   self.handle_cancel_game,
-            "send_chat":     self.handle_send_chat,
-            "extend_game":   self.handle_extend_game,
-            "finish_game":   self.handle_finish_game,
-            "request_peek":  self.handle_request_peek,
-            "accept_peek":   self.handle_accept_peek,
-            "decline_peek":  self.handle_decline_peek,
+            "start_game":       self.handle_start_game,
+            "place_bid":        self.handle_place_bid,
+            "play_card":        self.handle_play_card,
+            "end_game":         self.handle_end_game,
+            "cancel_game":      self.handle_cancel_game,
+            "send_chat":        self.handle_send_chat,
+            "extend_game":      self.handle_extend_game,
+            "finish_game":      self.handle_finish_game,
+            "request_peek":     self.handle_request_peek,
+            "accept_peek":      self.handle_accept_peek,
+            "decline_peek":     self.handle_decline_peek,
+            "request_takeover": self.handle_request_takeover,
+            "accept_takeover":  self.handle_accept_takeover,
+            "decline_takeover": self.handle_decline_takeover,
         }
         handler = handlers.get(data.get("action"))
         if handler:
@@ -226,6 +229,59 @@ class GameConsumer(AsyncWebsocketConsumer):
                 "spectator": spectator_username,
                 "accepted": False,
                 "target_seat": None,
+            }
+        )
+
+    async def handle_request_takeover(self, data):
+        if not self.is_spec:
+            return
+        target_seat = data.get("target_seat")
+        if target_seat is None:
+            return
+        target = await self.db_get_player_by_seat(target_seat)
+        if target is None:
+            return
+        await self.channel_layer.group_send(
+            self.room_group,
+            {
+                "type": "takeover_requested_msg",
+                "requester": self.username,
+                "target_seat": target_seat,
+                "target_username": target.username,
+            }
+        )
+
+    async def handle_accept_takeover(self, data):
+        requester = data.get("requester")
+        if not requester:
+            return
+        player = await self.db_get_player_by_username(self.username)
+        if player is None:
+            return
+        old_username = player.username
+        seat = player.seat
+        await self.db_rename_player(player, requester)
+        await self.channel_layer.group_send(
+            self.room_group,
+            {
+                "type": "ownership_transferred_msg",
+                "from_username": old_username,
+                "to_username": requester,
+                "seat": seat,
+            }
+        )
+        await self.broadcast_state()
+
+    async def handle_decline_takeover(self, data):
+        requester = data.get("requester")
+        if not requester:
+            return
+        await self.channel_layer.group_send(
+            self.room_group,
+            {
+                "type": "takeover_response_msg",
+                "requester": requester,
+                "accepted": False,
             }
         )
 
@@ -508,6 +564,29 @@ class GameConsumer(AsyncWebsocketConsumer):
             "target_seat": event["target_seat"],
         }))
 
+    async def takeover_requested_msg(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "takeover_requested",
+            "requester": event["requester"],
+            "target_seat": event["target_seat"],
+            "target_username": event["target_username"],
+        }))
+
+    async def takeover_response_msg(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "takeover_response",
+            "requester": event["requester"],
+            "accepted": event["accepted"],
+        }))
+
+    async def ownership_transferred_msg(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "ownership_transferred",
+            "from_username": event["from_username"],
+            "to_username": event["to_username"],
+            "seat": event["seat"],
+        }))
+
     async def send_error(self, message):
         await self.send(text_data=json.dumps({"type": "error", "message": message}))
 
@@ -677,12 +756,12 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def set_connected(self, connected):
-        if self.is_spec:
+        # Try player table first — covers normal players and post-takeover controllers
+        updated = Player.objects.filter(
+            game__code=self.game_code, username=self.username
+        ).update(is_connected=connected)
+        if not updated:
             Spectator.objects.filter(
-                game__code=self.game_code, username=self.username
-            ).update(is_connected=connected)
-        else:
-            Player.objects.filter(
                 game__code=self.game_code, username=self.username
             ).update(is_connected=connected)
 
@@ -814,3 +893,18 @@ class GameConsumer(AsyncWebsocketConsumer):
         for k, v in kwargs.items():
             setattr(spec, k, v)
         spec.save()
+
+    @database_sync_to_async
+    def db_get_player_by_username(self, username):
+        try:
+            return Player.objects.get(game__code=self.game_code, username=username)
+        except Player.DoesNotExist:
+            return None
+
+    @database_sync_to_async
+    def db_rename_player(self, player, new_username):
+        # Remove spectator row for the incoming controller (they're becoming a player)
+        Spectator.objects.filter(game=player.game, username=new_username).delete()
+        player.username = new_username
+        player.is_connected = True
+        player.save()

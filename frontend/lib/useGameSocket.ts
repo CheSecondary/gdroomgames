@@ -12,9 +12,10 @@ export interface ChatMessage {
   isSpectator?: boolean;
 }
 
-export type PeekStatus = "idle" | "pending" | "accepted" | "declined";
+export type PeekStatus     = "idle" | "pending" | "accepted" | "declined";
+export type TakeoverStatus = "idle" | "pending" | "declined";
 
-export function useGameSocket(gameCode: string, username: string, spectateSeat?: number) {
+export function useGameSocket(gameCode: string, username: string, spectateSeat?: number, takeoverSeat?: number) {
   const ws = useRef<WebSocket | null>(null);
   const [state, setState] = useState<GameState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -23,8 +24,10 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
   const [trickWinner, setTrickWinner] = useState<{ winner: string; seat: number } | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [peekStatus, setPeekStatus] = useState<PeekStatus>("idle");
-  // Incoming peek request (for target player to see)
   const [peekRequest, setPeekRequest] = useState<{ spectator: string; targetSeat: number } | null>(null);
+  const [takeoverStatus, setTakeoverStatus] = useState<TakeoverStatus>("idle");
+  const [takeoverRequest, setTakeoverRequest] = useState<{ requester: string; targetSeat: number } | null>(null);
+  const [handedOff, setHandedOff] = useState<{ to: string; from: string; seat: number } | null>(null);
 
   useEffect(() => {
     if (!username) return;
@@ -76,6 +79,19 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
           if (msg.spectator === username) {
             setPeekStatus(msg.accepted ? "accepted" : "declined");
           }
+        } else if (msg.type === "takeover_requested") {
+          setTakeoverRequest({ requester: msg.requester, targetSeat: msg.target_seat });
+        } else if (msg.type === "takeover_response") {
+          if (msg.requester === username) {
+            setTakeoverStatus(msg.accepted ? "idle" : "declined");
+          }
+        } else if (msg.type === "ownership_transferred") {
+          // Always set handedOff — GameBoard uses it for toasts for ALL players
+          setHandedOff({ to: msg.to_username, from: msg.from_username, seat: msg.seat });
+          if (msg.to_username === username) {
+            setTakeoverStatus("idle"); // accepted — now a normal player
+            setTakeoverRequest(null);
+          }
         } else if (msg.type === "game_cancelled") {
           window.location.href = "/lobby";
         }
@@ -101,7 +117,7 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
         socket.close();
       }
     };
-  }, [gameCode, username, spectateSeat]);
+  }, [gameCode, username, spectateSeat, takeoverSeat]);
 
   const send = useCallback((data: object) => {
     if (ws.current?.readyState === WebSocket.OPEN) {
@@ -118,17 +134,29 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
   const sendChat     = useCallback((message: string) => send({ action: "send_chat", message }), [send]);
   const extendGame   = useCallback(() => send({ action: "extend_game" }), [send]);
   const finishGame   = useCallback(() => send({ action: "finish_game" }), [send]);
-  const requestPeek  = useCallback((targetSeat: number) => {
+  const requestPeek     = useCallback((targetSeat: number) => {
     setPeekStatus("pending");
     send({ action: "request_peek", target_seat: targetSeat });
   }, [send]);
-  const acceptPeek   = useCallback((spectator: string) => {
+  const acceptPeek      = useCallback((spectator: string) => {
     send({ action: "accept_peek", spectator });
     setPeekRequest(null);
   }, [send]);
-  const declinePeek  = useCallback((spectator: string) => {
+  const declinePeek     = useCallback((spectator: string) => {
     send({ action: "decline_peek", spectator });
     setPeekRequest(null);
+  }, [send]);
+  const requestTakeover = useCallback((targetSeat: number) => {
+    setTakeoverStatus("pending");
+    send({ action: "request_takeover", target_seat: targetSeat });
+  }, [send]);
+  const acceptTakeover  = useCallback((requester: string) => {
+    send({ action: "accept_takeover", requester });
+    setTakeoverRequest(null);
+  }, [send]);
+  const declineTakeover = useCallback((requester: string) => {
+    send({ action: "decline_takeover", requester });
+    setTakeoverRequest(null);
   }, [send]);
 
   return {
@@ -140,6 +168,9 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
     chatMessages,
     peekStatus,
     peekRequest,
+    takeoverStatus,
+    takeoverRequest,
+    handedOff,
     clearSummary,
     startGame,
     cancelGame,
@@ -152,5 +183,8 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
     requestPeek,
     acceptPeek,
     declinePeek,
+    requestTakeover,
+    acceptTakeover,
+    declineTakeover,
   };
 }
