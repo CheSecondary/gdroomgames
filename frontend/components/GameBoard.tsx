@@ -554,10 +554,16 @@ export default function GameBoard({
 
       {/* ── Spectator banner (when accepted) ─────────────────────────────────── */}
       {isSpectator && peekStatus === "accepted" && (
-        <div className="shrink-0 bg-yellow-400/10 border-b border-yellow-400/20 px-3 py-1 text-center">
+        <div className="shrink-0 bg-yellow-400/10 border-b border-yellow-400/20 px-3 py-1 flex items-center justify-between">
           <span className="text-yellow-400 text-[11px] font-semibold">
             👁️ Spectating {state.players.find(p => p.seat === spectateSeat)?.username ?? "player"} — view only
           </span>
+          <button
+            onClick={() => { window.location.href = "/lobby"; }}
+            className="text-gray-500 hover:text-gray-300 text-[10px] transition-colors"
+          >
+            Exit ✕
+          </button>
         </div>
       )}
 
