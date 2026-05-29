@@ -31,6 +31,39 @@ def _full_deck(num_decks: int) -> list[dict]:
     ]
 
 
+def _unseen_cards(
+    num_decks: int,
+    my_hand: list[dict],
+    completed_tricks: list[dict],
+    trick_so_far: list[dict],
+):
+    """
+    Returns the multiset (Counter) of cards not yet seen:
+    - not in my hand
+    - not played in completed tricks
+    - not played so far in the current trick
+
+    Used by both _highest_unseen and _unseen_count_per_suit to avoid
+    recomputing the same removal logic twice.
+    """
+    from collections import Counter
+    full = Counter((c["suit"], c["rank"]) for c in _full_deck(num_decks))
+    for c in my_hand:
+        key = (c["suit"], c["rank"])
+        if full[key] > 0:
+            full[key] -= 1
+    for t in completed_tricks:
+        for entry in t["cards"]:
+            key = (entry["card"]["suit"], entry["card"]["rank"])
+            if full[key] > 0:
+                full[key] -= 1
+    for entry in trick_so_far:
+        key = (entry["card"]["suit"], entry["card"]["rank"])
+        if full[key] > 0:
+            full[key] -= 1
+    return full
+
+
 def _highest_unseen(
     num_decks: int,
     my_hand: list[dict],
@@ -38,37 +71,10 @@ def _highest_unseen(
     trick_so_far: list[dict],
 ) -> dict[str, str | None]:
     """
-    For each suit, return the rank of the highest card that has NOT been seen
-    (i.e. not in my hand and not played in any completed/in-progress trick).
-
-    This is the card-counter's answer to: "what's the strongest card I don't
-    know the location of?" — crucial for decisions like "is my Q♥ safe to play
-    or could someone still beat it?"
+    For each suit, the rank of the highest card not yet seen.
+    E.g. A♠+K♠ played → {"spades": "Q"} → my J♠ cannot win, but my Q♠ could.
     """
-    # Build a multiset of all cards in the game
-    from collections import Counter
-    full = Counter((c["suit"], c["rank"]) for c in _full_deck(num_decks))
-
-    # Remove cards I can see: my own hand
-    for c in my_hand:
-        key = (c["suit"], c["rank"])
-        if full[key] > 0:
-            full[key] -= 1
-
-    # Remove cards played in completed tricks
-    for t in completed_tricks:
-        for entry in t["cards"]:
-            key = (entry["card"]["suit"], entry["card"]["rank"])
-            if full[key] > 0:
-                full[key] -= 1
-
-    # Remove cards played so far in current trick
-    for entry in trick_so_far:
-        key = (entry["card"]["suit"], entry["card"]["rank"])
-        if full[key] > 0:
-            full[key] -= 1
-
-    # For each suit find the highest remaining unseen rank
+    full = _unseen_cards(num_decks, my_hand, completed_tricks, trick_so_far)
     result: dict[str, str | None] = {}
     for suit in SUITS:
         best = None
@@ -77,6 +83,67 @@ def _highest_unseen(
                 best = rank
                 break
         result[suit] = best
+    return result
+
+
+def _unseen_count_per_suit(
+    num_decks: int,
+    my_hand: list[dict],
+    completed_tricks: list[dict],
+    trick_so_far: list[dict],
+) -> dict[str, int]:
+    """
+    For each suit, how many cards are still unaccounted for (not in my hand,
+    not yet played in any trick).
+
+    This is the "gamble risk" number for trump plays:
+    - unseen_count["spades"] = 2 + highest_unseen["spades"] = "A"
+      → only 2 spades left floating, one of which is the Ace — risky to play
+    - unseen_count["spades"] = 8 + highest_unseen["spades"] = "5"
+      → 8 low spades are floating, your 6♠ is the top remaining — safe
+    """
+    full = _unseen_cards(num_decks, my_hand, completed_tricks, trick_so_far)
+    return {
+        suit: sum(full[(suit, rank)] for rank in RANKS)
+        for suit in SUITS
+    }
+
+
+def _trump_card_risk(
+    num_decks: int,
+    my_hand: list[dict],
+    completed_tricks: list[dict],
+    trick_so_far: list[dict],
+    trump_suit: str,
+) -> list[dict]:
+    """
+    For each trump card in my hand, count how many unseen trump cards outrank it.
+
+    Example: I hold 6♠, 9♠, A♠ and trump is spades.
+      - 6♠: A♠, K♠, Q♠, J♠, 10♠, 9♠, 8♠, 7♠ are all above → unseen_above = however many of those aren't in my hand or played
+      - 9♠: A♠, K♠, Q♠, J♠, 10♠ are above → smaller risk
+      - A♠: nothing above → unseen_above = 0 (guaranteed win if only trump played)
+
+    This directly models the "gamble" decision: play my 6♠ and hope for the best.
+    unseen_above=0 → guaranteed win; unseen_above=3 → three cards can beat me.
+    """
+    full = _unseen_cards(num_decks, my_hand, completed_tricks, trick_so_far)
+    my_trumps = [c for c in my_hand if c["suit"] == trump_suit]
+    result = []
+    for card in my_trumps:
+        my_val = RANK_VAL[card["rank"]]
+        # Count unseen trump cards strictly above this card's rank
+        unseen_above = sum(
+            full[(trump_suit, rank)]
+            for rank in RANKS
+            if RANK_VAL[rank] > my_val
+        )
+        result.append({
+            "rank":         card["rank"],
+            "unseen_above": unseen_above,   # 0 = safe guaranteed win on trump; >0 = gamble
+        })
+    # Sort highest trump first (most useful for the model to scan)
+    result.sort(key=lambda x: RANK_VAL[x["rank"]], reverse=True)
     return result
 
 
@@ -413,13 +480,34 @@ def build_game_log(game_code: str) -> list:
                         if c["card"]["suit"] == rnd.trump_suit
                     ),
                     # For each suit: highest rank still in play (not in my hand, not played yet).
-                    # E.g. if A♥ and K♥ are gone → "hearts": "Q" → my Q♥ can win.
+                    # E.g. A♥+K♥ gone → {"hearts":"Q"} → my Q♥ beats anything still out.
                     # None means that suit has no remaining unseen cards.
                     "highest_unseen_per_suit": _highest_unseen(
                         game.num_decks,
                         tc.hand_before or [],
                         completed_tricks_history,
-                        list(trick_so_far),   # also exclude current trick cards already played
+                        list(trick_so_far),
+                    ),
+                    # For each suit: total count of unaccounted cards (not in hand, not played).
+                    # The "gamble risk" number. Combined with highest_unseen:
+                    #   unseen_count["spades"]=2 + highest_unseen["spades"]="A" → very risky,
+                    #   unseen_count["spades"]=7 + highest_unseen["spades"]="4" → your 5♠ is safe.
+                    "unseen_count_per_suit": _unseen_count_per_suit(
+                        game.num_decks,
+                        tc.hand_before or [],
+                        completed_tricks_history,
+                        list(trick_so_far),
+                    ),
+                    # How many of the unseen cards in trump suit outrank each trump I hold?
+                    # Directly answers "is my 6♠ a risky play?" without the model
+                    # having to cross-reference hand_before vs highest_unseen.
+                    # Format: [{"rank":"6","unseen_above":3}, ...] for each trump in hand.
+                    "my_trump_cards_risk": _trump_card_risk(
+                        game.num_decks,
+                        tc.hand_before or [],
+                        completed_tricks_history,
+                        list(trick_so_far),
+                        rnd.trump_suit,
                     ),
                     # Prior tricks in this round (full card history)
                     # Crucial for inferring: suit voids, card depletion, teammate patterns
