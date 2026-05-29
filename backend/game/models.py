@@ -95,7 +95,10 @@ class TrickCard(models.Model):
     rank        = models.CharField(max_length=2)
     deck_id     = models.PositiveSmallIntegerField(default=1)
     play_order  = models.PositiveSmallIntegerField()   # 0 = first played
-    hand_before = models.JSONField(default=list)       # player's hand before playing this card
+    hand_before          = models.JSONField(default=list)  # player's full hand before playing
+    all_scores_snapshot  = models.JSONField(default=dict)  # {seat: total_score} at moment of play
+    all_tricks_snapshot  = models.JSONField(default=dict)  # {seat: tricks_won_this_round} at moment of play
+    all_bids_snapshot    = models.JSONField(default=dict)  # {seat: bid} for this round
 
     class Meta:
         ordering = ["play_order"]
@@ -109,9 +112,10 @@ class BidLog(models.Model):
     username           = models.CharField(max_length=50)
     trump_suit         = models.CharField(max_length=10)
     trump_card         = models.JSONField(default=dict, blank=True, null=True)
-    hand_snapshot      = models.JSONField(default=list)   # full hand at time of bid
-    others_bids_before = models.JSONField(default=list)   # [{seat, username, bid}, ...]
-    bid_made           = models.SmallIntegerField()
+    hand_snapshot           = models.JSONField(default=list)  # full hand at time of bid
+    others_bids_before      = models.JSONField(default=list)  # [{seat, username, bid}, ...]
+    bid_made                = models.SmallIntegerField()
+    all_scores_before_round = models.JSONField(default=dict)  # {seat: total_score} at round start
 
     class Meta:
         ordering = ["round_number", "seat"]

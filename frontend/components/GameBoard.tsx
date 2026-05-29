@@ -1142,6 +1142,9 @@ function GameOverBanner({
         <button onClick={onNewGame} className="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2.5 rounded-xl">
           New Game →
         </button>
+        <p className="text-xs text-gray-500 mt-2.5 flex items-center justify-center gap-1">
+          <span>📊</span> Game data saved for AI training
+        </p>
       </motion.div>
     );
   }
@@ -1170,6 +1173,9 @@ function GameOverBanner({
       <button onClick={onNewGame} className="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2.5 rounded-xl">
         New Game →
       </button>
+      <p className="text-xs text-gray-500 mt-2.5 flex items-center justify-center gap-1">
+        <span>📊</span> Game data saved for AI training
+      </p>
     </motion.div>
   );
 }

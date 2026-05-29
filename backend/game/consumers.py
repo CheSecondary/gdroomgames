@@ -822,11 +822,10 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def db_set_bid(self, game, player, bid):
-        # Capture who has already bid (for ML context)
+        all_players   = list(game.players.order_by("seat"))
         others_before = [
             {"seat": p.seat, "username": p.username, "bid": p.bid}
-            for p in game.players.order_by("seat")
-            if p.bid >= 0 and p.seat != player.seat
+            for p in all_players if p.bid >= 0 and p.seat != player.seat
         ]
         BidLog.objects.create(
             game=game,
@@ -838,6 +837,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             hand_snapshot=list(player.hand),
             others_bids_before=others_before,
             bid_made=bid,
+            all_scores_before_round={str(p.seat): p.total_score for p in all_players},
         )
         player.bid = bid
         player.save()
@@ -865,11 +865,15 @@ class GameConsumer(AsyncWebsocketConsumer):
         if order == 0:
             trick.lead_suit = card["suit"]
             trick.save()
+        all_players = list(game.players.all())
         TrickCard.objects.create(
             trick=trick, player=player,
             suit=card["suit"], rank=card["rank"],
             deck_id=card.get("deck_id", 1), play_order=order,
-            hand_before=list(player.hand),  # snapshot before card is removed
+            hand_before=list(player.hand),
+            all_scores_snapshot={str(p.seat): p.total_score  for p in all_players},
+            all_tricks_snapshot={str(p.seat): p.tricks_won   for p in all_players},
+            all_bids_snapshot  ={str(p.seat): p.bid          for p in all_players},
         )
         player.hand = [
             c for c in player.hand
