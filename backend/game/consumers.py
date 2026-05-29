@@ -2,7 +2,7 @@ import json
 from urllib.parse import parse_qs
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from .models import Game, Player, Round, Trick, TrickCard, Spectator
+from .models import Game, Player, Round, Trick, TrickCard, Spectator, BidLog
 from . import engine
 
 
@@ -111,7 +111,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.send_error(f"Bid must be 0–{game.current_round}.")
             return
 
-        await self.db_set_bid(player, bid)
+        await self.db_set_bid(game, player, bid)
 
         # In teams mode, copy the captain's bid to all teammates so everyone sees it
         if game.teams_enabled:
@@ -148,6 +148,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             return
         await self.db_update_game(game, status=Game.STATUS_FINISHED)
         await self.broadcast_state()
+        await self.trigger_export(game.code)
 
     async def handle_cancel_game(self, data):
         game = await self.get_game()
@@ -319,6 +320,7 @@ class GameConsumer(AsyncWebsocketConsumer):
 
         await self.db_update_game(game, status=Game.STATUS_FINISHED)
         await self.broadcast_state()
+        await self.trigger_export(game.code)
 
     # ── Flow ──────────────────────────────────────────────────────────────────
 
@@ -475,6 +477,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                 await self.db_update_game(game, status=Game.STATUS_PROMPT)
             else:
                 await self.db_update_game(game, status=Game.STATUS_FINISHED)
+                await self.trigger_export(game.code)
             await self.broadcast_state()
             return
 
@@ -513,6 +516,12 @@ class GameConsumer(AsyncWebsocketConsumer):
         return True, ""
 
     # ── Broadcast ─────────────────────────────────────────────────────────────
+
+    async def trigger_export(self, game_code):
+        """Fire-and-forget: send game log to Telegram in background thread."""
+        import asyncio
+        from .export import send_game_log_to_telegram
+        asyncio.create_task(asyncio.to_thread(send_game_log_to_telegram, game_code))
 
     async def broadcast_state(self):
         state = await self.build_state()
@@ -812,7 +821,24 @@ class GameConsumer(AsyncWebsocketConsumer):
             p.save()
 
     @database_sync_to_async
-    def db_set_bid(self, player, bid):
+    def db_set_bid(self, game, player, bid):
+        # Capture who has already bid (for ML context)
+        others_before = [
+            {"seat": p.seat, "username": p.username, "bid": p.bid}
+            for p in game.players.order_by("seat")
+            if p.bid >= 0 and p.seat != player.seat
+        ]
+        BidLog.objects.create(
+            game=game,
+            round_number=game.current_round,
+            seat=player.seat,
+            username=player.username,
+            trump_suit=game.trump_suit,
+            trump_card=game.trump_card,
+            hand_snapshot=list(player.hand),
+            others_bids_before=others_before,
+            bid_made=bid,
+        )
         player.bid = bid
         player.save()
 
@@ -843,6 +869,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             trick=trick, player=player,
             suit=card["suit"], rank=card["rank"],
             deck_id=card.get("deck_id", 1), play_order=order,
+            hand_before=list(player.hand),  # snapshot before card is removed
         )
         player.hand = [
             c for c in player.hand

@@ -89,15 +89,32 @@ class Trick(models.Model):
 
 
 class TrickCard(models.Model):
-    trick      = models.ForeignKey(Trick, on_delete=models.CASCADE, related_name="cards")
-    player     = models.ForeignKey(Player, on_delete=models.CASCADE)
-    suit       = models.CharField(max_length=10)
-    rank       = models.CharField(max_length=2)
-    deck_id    = models.PositiveSmallIntegerField(default=1)
-    play_order = models.PositiveSmallIntegerField()   # 0 = first played
+    trick       = models.ForeignKey(Trick, on_delete=models.CASCADE, related_name="cards")
+    player      = models.ForeignKey(Player, on_delete=models.CASCADE)
+    suit        = models.CharField(max_length=10)
+    rank        = models.CharField(max_length=2)
+    deck_id     = models.PositiveSmallIntegerField(default=1)
+    play_order  = models.PositiveSmallIntegerField()   # 0 = first played
+    hand_before = models.JSONField(default=list)       # player's hand before playing this card
 
     class Meta:
         ordering = ["play_order"]
+
+
+class BidLog(models.Model):
+    """Records every bid decision with full context for ML training."""
+    game               = models.ForeignKey(Game, on_delete=models.CASCADE, related_name="bid_logs")
+    round_number       = models.PositiveSmallIntegerField()
+    seat               = models.PositiveSmallIntegerField()
+    username           = models.CharField(max_length=50)
+    trump_suit         = models.CharField(max_length=10)
+    trump_card         = models.JSONField(default=dict, blank=True, null=True)
+    hand_snapshot      = models.JSONField(default=list)   # full hand at time of bid
+    others_bids_before = models.JSONField(default=list)   # [{seat, username, bid}, ...]
+    bid_made           = models.SmallIntegerField()
+
+    class Meta:
+        ordering = ["round_number", "seat"]
 
 
 class Spectator(models.Model):
