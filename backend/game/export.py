@@ -16,6 +16,69 @@ import requests
 from django.conf import settings
 from .models import Game
 
+SUITS = ["spades", "hearts", "diamonds", "clubs"]
+RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
+RANK_VAL = {r: i for i, r in enumerate(RANKS)}  # 2=0 … A=12
+
+
+def _full_deck(num_decks: int) -> list[dict]:
+    """All cards that exist in the game (before any dealing)."""
+    return [
+        {"suit": s, "rank": r}
+        for _ in range(num_decks)
+        for s in SUITS
+        for r in RANKS
+    ]
+
+
+def _highest_unseen(
+    num_decks: int,
+    my_hand: list[dict],
+    completed_tricks: list[dict],
+    trick_so_far: list[dict],
+) -> dict[str, str | None]:
+    """
+    For each suit, return the rank of the highest card that has NOT been seen
+    (i.e. not in my hand and not played in any completed/in-progress trick).
+
+    This is the card-counter's answer to: "what's the strongest card I don't
+    know the location of?" — crucial for decisions like "is my Q♥ safe to play
+    or could someone still beat it?"
+    """
+    # Build a multiset of all cards in the game
+    from collections import Counter
+    full = Counter((c["suit"], c["rank"]) for c in _full_deck(num_decks))
+
+    # Remove cards I can see: my own hand
+    for c in my_hand:
+        key = (c["suit"], c["rank"])
+        if full[key] > 0:
+            full[key] -= 1
+
+    # Remove cards played in completed tricks
+    for t in completed_tricks:
+        for entry in t["cards"]:
+            key = (entry["card"]["suit"], entry["card"]["rank"])
+            if full[key] > 0:
+                full[key] -= 1
+
+    # Remove cards played so far in current trick
+    for entry in trick_so_far:
+        key = (entry["card"]["suit"], entry["card"]["rank"])
+        if full[key] > 0:
+            full[key] -= 1
+
+    # For each suit find the highest remaining unseen rank
+    result: dict[str, str | None] = {}
+    for suit in SUITS:
+        best = None
+        for rank in reversed(RANKS):  # A down to 2
+            if full[(suit, rank)] > 0:
+                best = rank
+                break
+        result[suit] = best
+    return result
+
 
 def build_game_log(game_code: str) -> list:
     try:
@@ -317,6 +380,47 @@ def build_game_log(game_code: str) -> list:
                         }
                         for s in sorted(scores.keys(), key=int)
                     ],
+                    # ── Card-counting helpers (pre-computed for the model) ──────
+                    # Explicit void detection: {spades:0, hearts:2, diamonds:3, clubs:0}
+                    # A 0 means player can trump or throw off that suit — critical info
+                    "suits_in_hand": {
+                        s: sum(1 for c in (tc.hand_before or []) if c["suit"] == s)
+                        for s in SUITS
+                    },
+                    # Is player void in lead suit right now?
+                    "void_in_lead_suit": (
+                        trick.lead_suit != "" and
+                        not any(c["suit"] == trick.lead_suit for c in (tc.hand_before or []))
+                    ),
+                    # Flat list of every card played in completed tricks this round.
+                    # Enables full card counting: which high cards are still live?
+                    "cards_played_this_round": [
+                        {
+                            "suit":      c["card"]["suit"],
+                            "rank":      c["card"]["rank"],
+                            "seat":      c["seat"],
+                            "trick_num": t["trick_num"],
+                            "play_type": c["play_type"],
+                        }
+                        for t in completed_tricks_history
+                        for c in t["cards"]
+                    ],
+                    # How many trump cards have already been played this round?
+                    # Low count → trumps still dangerous; high count → field is clearer
+                    "trumps_played_this_round": sum(
+                        1 for t in completed_tricks_history
+                        for c in t["cards"]
+                        if c["card"]["suit"] == rnd.trump_suit
+                    ),
+                    # For each suit: highest rank still in play (not in my hand, not played yet).
+                    # E.g. if A♥ and K♥ are gone → "hearts": "Q" → my Q♥ can win.
+                    # None means that suit has no remaining unseen cards.
+                    "highest_unseen_per_suit": _highest_unseen(
+                        game.num_decks,
+                        tc.hand_before or [],
+                        completed_tricks_history,
+                        list(trick_so_far),   # also exclude current trick cards already played
+                    ),
                     # Prior tricks in this round (full card history)
                     # Crucial for inferring: suit voids, card depletion, teammate patterns
                     # e.g. "teammate threw off diamonds in trick 2 → likely void in diamonds now"
