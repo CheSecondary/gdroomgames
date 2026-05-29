@@ -109,41 +109,55 @@ def _unseen_count_per_suit(
     }
 
 
-def _trump_card_risk(
+def _cards_risk_by_suit(
     num_decks: int,
     my_hand: list[dict],
     completed_tricks: list[dict],
     trick_so_far: list[dict],
     trump_suit: str,
-) -> list[dict]:
+) -> dict[str, list[dict]]:
     """
-    For each trump card in my hand, count how many unseen trump cards outrank it.
+    For EVERY card in my hand, how many unseen cards of the same suit outrank it?
 
-    Example: I hold 6♠, 9♠, A♠ and trump is spades.
-      - 6♠: A♠, K♠, Q♠, J♠, 10♠, 9♠, 8♠, 7♠ are all above → unseen_above = however many of those aren't in my hand or played
-      - 9♠: A♠, K♠, Q♠, J♠, 10♠ are above → smaller risk
-      - A♠: nothing above → unseen_above = 0 (guaranteed win if only trump played)
+    Applies to trump and all regular suits equally.
+    - Trump card 6♠ with unseen_above=0 → guaranteed win if only trump in trick
+    - Non-trump K♥ with unseen_above=0 → A♥ already played, K♥ tops hearts
+    - Non-trump 6♣ with unseen_above=7 → risky to lead clubs, many cards beat it
 
-    This directly models the "gamble" decision: play my 6♠ and hope for the best.
-    unseen_above=0 → guaranteed win; unseen_above=3 → three cards can beat me.
+    Format: {
+        "spades":   [{"rank":"A","unseen_above":0,"is_trump":true}, ...],  # sorted high→low
+        "hearts":   [...],
+        "diamonds": [...],
+        "clubs":    [...],
+    }
+    Only suits where I actually hold cards are populated.
     """
     full = _unseen_cards(num_decks, my_hand, completed_tricks, trick_so_far)
-    my_trumps = [c for c in my_hand if c["suit"] == trump_suit]
-    result = []
-    for card in my_trumps:
-        my_val = RANK_VAL[card["rank"]]
-        # Count unseen trump cards strictly above this card's rank
-        unseen_above = sum(
-            full[(trump_suit, rank)]
-            for rank in RANKS
-            if RANK_VAL[rank] > my_val
-        )
-        result.append({
-            "rank":         card["rank"],
-            "unseen_above": unseen_above,   # 0 = safe guaranteed win on trump; >0 = gamble
-        })
-    # Sort highest trump first (most useful for the model to scan)
-    result.sort(key=lambda x: RANK_VAL[x["rank"]], reverse=True)
+    # Group my hand by suit
+    by_suit: dict[str, list[dict]] = {s: [] for s in SUITS}
+    for card in my_hand:
+        by_suit[card["suit"]].append(card)
+
+    result: dict[str, list[dict]] = {}
+    for suit in SUITS:
+        cards_in_suit = by_suit[suit]
+        if not cards_in_suit:
+            continue
+        entries = []
+        for card in cards_in_suit:
+            my_val = RANK_VAL[card["rank"]]
+            unseen_above = sum(
+                full[(suit, rank)]
+                for rank in RANKS
+                if RANK_VAL[rank] > my_val
+            )
+            entries.append({
+                "rank":         card["rank"],
+                "is_trump":     suit == trump_suit,
+                "unseen_above": unseen_above,   # 0=safe/guaranteed; >0=gamble risk count
+            })
+        entries.sort(key=lambda x: RANK_VAL[x["rank"]], reverse=True)
+        result[suit] = entries
     return result
 
 
@@ -498,11 +512,12 @@ def build_game_log(game_code: str) -> list:
                         completed_tricks_history,
                         list(trick_so_far),
                     ),
-                    # How many of the unseen cards in trump suit outrank each trump I hold?
-                    # Directly answers "is my 6♠ a risky play?" without the model
-                    # having to cross-reference hand_before vs highest_unseen.
-                    # Format: [{"rank":"6","unseen_above":3}, ...] for each trump in hand.
-                    "my_trump_cards_risk": _trump_card_risk(
+                    # For every card in hand: how many unseen same-suit cards beat it?
+                    # Covers trump AND regular suits equally.
+                    # Trump example: 6♠ unseen_above=5 → 5 spades can still beat me
+                    # Non-trump: K♥ unseen_above=0 → A♥ already played, K is top hearts
+                    # Format: {"spades":[{"rank":"6","is_trump":true,"unseen_above":5},...], ...}
+                    "cards_risk_by_suit": _cards_risk_by_suit(
                         game.num_decks,
                         tc.hand_before or [],
                         completed_tricks_history,

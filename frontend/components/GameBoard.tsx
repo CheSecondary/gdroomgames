@@ -666,9 +666,15 @@ export default function GameBoard({
                 )}
               </div>
 
-              {/* Team signal buttons (teams mode, my turn, not spectating) */}
+              {/* Team signal buttons — only when teams mode is formally enabled */}
               {state.teams_enabled && myTurn && !isSpectator && onSendTeamSignal && (
                 <TeamSignalButtons onSend={onSendTeamSignal} />
+              )}
+              {/* Hint when playing multi-player without teams mode */}
+              {!state.teams_enabled && myTurn && !isSpectator && state.players.length >= 4 && (
+                <p className="text-[10px] text-gray-600 text-center py-1 px-2">
+                  💡 Create with <span className="text-gray-400">Teams mode</span> to unlock signals
+                </p>
               )}
 
               {/* Cards — flex-wrap, fully visible, no overlap */}
