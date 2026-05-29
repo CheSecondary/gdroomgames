@@ -314,6 +314,7 @@ def build_game_log(game_code: str) -> list:
                     ],
                     # Decision
                     "card_played":  {"suit": tc.suit, "rank": tc.rank, "deck_id": tc.deck_id},
+                    "team_signal_sent": tc.team_signal or None,   # signal sent to teammate before this play
                     "won_trick":    trick.winner_id == p.id if trick.winner_id else False,
                     # Round outcome (labelled — key training signal)
                     "tricks_won_this_round": rnd_tricks,

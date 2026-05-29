@@ -99,6 +99,7 @@ class TrickCard(models.Model):
     all_scores_snapshot  = models.JSONField(default=dict)  # {seat: total_score} at moment of play
     all_tricks_snapshot  = models.JSONField(default=dict)  # {seat: tricks_won_this_round} at moment of play
     all_bids_snapshot    = models.JSONField(default=dict)  # {seat: bid} for this round
+    team_signal = models.CharField(max_length=20, blank=True, default="")
 
     class Meta:
         ordering = ["play_order"]
