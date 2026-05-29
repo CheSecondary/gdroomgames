@@ -36,18 +36,25 @@ def _unseen_cards(
     my_hand: list[dict],
     completed_tricks: list[dict],
     trick_so_far: list[dict],
+    trump_card: dict | None = None,
 ):
     """
     Returns the multiset (Counter) of cards not yet seen:
     - not in my hand
     - not played in completed tricks
     - not played so far in the current trick
+    - not the trump card (removed from deck before dealing)
 
     Used by both _highest_unseen and _unseen_count_per_suit to avoid
     recomputing the same removal logic twice.
     """
     from collections import Counter
     full = Counter((c["suit"], c["rank"]) for c in _full_deck(num_decks))
+    # Subtract the trump card — it's removed from the deck before dealing and is never in play
+    if trump_card:
+        key = (trump_card["suit"], trump_card["rank"])
+        if full[key] > 0:
+            full[key] -= 1
     for c in my_hand:
         key = (c["suit"], c["rank"])
         if full[key] > 0:
@@ -69,12 +76,13 @@ def _highest_unseen(
     my_hand: list[dict],
     completed_tricks: list[dict],
     trick_so_far: list[dict],
+    trump_card: dict | None = None,
 ) -> dict[str, str | None]:
     """
     For each suit, the rank of the highest card not yet seen.
     E.g. A♠+K♠ played → {"spades": "Q"} → my J♠ cannot win, but my Q♠ could.
     """
-    full = _unseen_cards(num_decks, my_hand, completed_tricks, trick_so_far)
+    full = _unseen_cards(num_decks, my_hand, completed_tricks, trick_so_far, trump_card)
     result: dict[str, str | None] = {}
     for suit in SUITS:
         best = None
@@ -91,6 +99,7 @@ def _unseen_count_per_suit(
     my_hand: list[dict],
     completed_tricks: list[dict],
     trick_so_far: list[dict],
+    trump_card: dict | None = None,
 ) -> dict[str, int]:
     """
     For each suit, how many cards are still unaccounted for (not in my hand,
@@ -102,7 +111,7 @@ def _unseen_count_per_suit(
     - unseen_count["spades"] = 8 + highest_unseen["spades"] = "5"
       → 8 low spades are floating, your 6♠ is the top remaining — safe
     """
-    full = _unseen_cards(num_decks, my_hand, completed_tricks, trick_so_far)
+    full = _unseen_cards(num_decks, my_hand, completed_tricks, trick_so_far, trump_card)
     return {
         suit: sum(full[(suit, rank)] for rank in RANKS)
         for suit in SUITS
@@ -115,6 +124,7 @@ def _cards_risk_by_suit(
     completed_tricks: list[dict],
     trick_so_far: list[dict],
     trump_suit: str,
+    trump_card: dict | None = None,
 ) -> dict[str, list[dict]]:
     """
     For EVERY card in my hand, how many unseen cards of the same suit outrank it?
@@ -132,7 +142,7 @@ def _cards_risk_by_suit(
     }
     Only suits where I actually hold cards are populated.
     """
-    full = _unseen_cards(num_decks, my_hand, completed_tricks, trick_so_far)
+    full = _unseen_cards(num_decks, my_hand, completed_tricks, trick_so_far, trump_card)
     # Group my hand by suit
     by_suit: dict[str, list[dict]] = {s: [] for s in SUITS}
     for card in my_hand:
@@ -167,6 +177,7 @@ def build_game_log(game_code: str) -> list:
             "players",
             "rounds__tricks__cards__player",
             "bid_logs",
+            "signal_logs",
         ).get(code=game_code)
     except Game.DoesNotExist:
         return []
@@ -283,6 +294,9 @@ def build_game_log(game_code: str) -> list:
             "is_last_round":   bl.round_number == game.max_rounds,
             "trump_suit":      bl.trump_suit,
             "trump_card":      bl.trump_card,
+            "trump_card_rank": bl.trump_card.get("rank") if bl.trump_card else None,
+            "trump_card_suit": bl.trump_card.get("suit") if bl.trump_card else None,
+            "trump_card_already_out": True,  # the trump card is always removed from deck before dealing
             # Player identity
             "seat":            bl.seat,
             "username":        bl.username,
@@ -316,6 +330,23 @@ def build_game_log(game_code: str) -> list:
             "tricks_won_this_round":  tricks_won,
             "bid_outcome":            bid_outcome,       # "made" | "overtrick" | "set" | null
             "team_bid_outcome":       team_bid_outcome,  # same, for the whole team
+        })
+
+    # ── 2b. Team signal events ─────────────────────────────────────────────────
+    for sl in game.signal_logs.order_by("round_number", "trick_number", "id"):
+        events.append({
+            "event":           "team_signal",
+            "game_code":       game.code,
+            "round":           sl.round_number,
+            "trick_num":       sl.trick_number,
+            "signal":          sl.signal,
+            "sender_seat":     sl.sender_seat,
+            "sender_username": sl.sender_username,
+            # How many players had already played in this trick when signal was sent?
+            # 0 = proactive (sent before trick starts or early)
+            # N = reactive (sent after seeing N cards played)
+            "cards_in_trick_when_sent": sl.cards_played_in_trick_at_time,
+            "teams_enabled":   game.teams_enabled,
         })
 
     # ── 3. Card play decisions ────────────────────────────────────────────────
@@ -501,6 +532,7 @@ def build_game_log(game_code: str) -> list:
                         tc.hand_before or [],
                         completed_tricks_history,
                         list(trick_so_far),
+                        trump_card=rnd.trump_card,
                     ),
                     # For each suit: total count of unaccounted cards (not in hand, not played).
                     # The "gamble risk" number. Combined with highest_unseen:
@@ -511,6 +543,7 @@ def build_game_log(game_code: str) -> list:
                         tc.hand_before or [],
                         completed_tricks_history,
                         list(trick_so_far),
+                        trump_card=rnd.trump_card,
                     ),
                     # For every card in hand: how many unseen same-suit cards beat it?
                     # Covers trump AND regular suits equally.
@@ -523,6 +556,7 @@ def build_game_log(game_code: str) -> list:
                         completed_tricks_history,
                         list(trick_so_far),
                         rnd.trump_suit,
+                        trump_card=rnd.trump_card,
                     ),
                     # Prior tricks in this round (full card history)
                     # Crucial for inferring: suit voids, card depletion, teammate patterns

@@ -2,7 +2,7 @@ import json
 from urllib.parse import parse_qs
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from .models import Game, Player, Round, Trick, TrickCard, Spectator, BidLog
+from .models import Game, Player, Round, Trick, TrickCard, Spectator, BidLog, TeamSignalLog
 from . import engine
 
 
@@ -317,6 +317,7 @@ class GameConsumer(AsyncWebsocketConsumer):
                     "from_username": self.username,
                 })
         self.pending_signal = signal
+        await self.db_log_team_signal(game, player, signal)
 
     async def handle_extend_game(self, data):
         game = await self.get_game()
@@ -773,6 +774,26 @@ class GameConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def get_usernames_for_seats(self, game, seats):
         return list(game.players.filter(seat__in=seats).values_list("username", flat=True))
+
+    @database_sync_to_async
+    def db_log_team_signal(self, game, player, signal):
+        cur_round = game.rounds.filter(is_complete=False).order_by("-number").first()
+        trick_number = 0
+        cards_in_trick = 0
+        if cur_round:
+            cur_trick = cur_round.tricks.filter(is_complete=False).order_by("-number").first()
+            if cur_trick:
+                trick_number = cur_trick.number
+                cards_in_trick = cur_trick.cards.count()
+        TeamSignalLog.objects.create(
+            game=game,
+            round_number=cur_round.number if cur_round else 0,
+            trick_number=trick_number,
+            sender_seat=player.seat,
+            sender_username=player.username,
+            signal=signal,
+            cards_played_in_trick_at_time=cards_in_trick,
+        )
 
     @database_sync_to_async
     def get_current_trick(self, game):

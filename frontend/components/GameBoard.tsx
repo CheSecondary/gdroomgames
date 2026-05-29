@@ -666,12 +666,12 @@ export default function GameBoard({
                 )}
               </div>
 
-              {/* Team signal buttons — only when teams mode is formally enabled */}
-              {state.teams_enabled && myTurn && !isSpectator && onSendTeamSignal && (
+              {/* Team signal buttons — show any time during play, not just on your turn */}
+              {state.teams_enabled && !isSpectator && state.status === "playing" && onSendTeamSignal && (
                 <TeamSignalButtons onSend={onSendTeamSignal} />
               )}
               {/* Hint when playing multi-player without teams mode */}
-              {!state.teams_enabled && myTurn && !isSpectator && state.players.length >= 4 && (
+              {!state.teams_enabled && !isSpectator && state.status === "playing" && state.players.length >= 4 && (
                 <p className="text-[10px] text-gray-600 text-center py-1 px-2">
                   💡 Create with <span className="text-gray-400">Teams mode</span> to unlock signals
                 </p>
@@ -1126,29 +1126,27 @@ function TeamSignalButtons({
 }: {
   onSend: (signal: TeamSignal) => void;
 }) {
-  const [sent, setSent] = useState<TeamSignal | null>(null);
+  const [lastSent, setLastSent] = useState<{ code: TeamSignal; at: number } | null>(null);
 
   const handleClick = (code: TeamSignal) => {
     onSend(code);
-    setSent(code);
-    setTimeout(() => setSent(null), 1800);
+    setLastSent({ code, at: Date.now() });
+    // Allow re-click immediately — flash clears after 600ms
+    setTimeout(() => setLastSent((prev) => (prev?.code === code ? null : prev)), 600);
   };
 
   return (
     <div className="px-1 pt-1 pb-1.5">
-      {/* Header */}
       <p className="text-[10px] text-gray-500 text-center mb-1.5 tracking-wide uppercase">
         Signal teammate
       </p>
-      {/* 2×2 grid on narrow mobile, 4-in-a-row on wider */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
         {SIGNALS.map(({ code, emoji, label, shortLabel, color, sentColor }) => {
-          const isSent = sent === code;
+          const isSent = lastSent?.code === code;
           return (
             <button
               key={code}
               onClick={() => handleClick(code)}
-              disabled={isSent}
               title={label}
               className={`
                 flex items-center justify-center gap-1.5 px-2 py-1.5
@@ -1159,7 +1157,6 @@ function TeamSignalButtons({
             >
               <span className="text-sm leading-none">{isSent ? "✓" : emoji}</span>
               <span className="leading-tight">
-                {/* Full label on desktop, short on mobile */}
                 <span className="hidden sm:inline">{isSent ? "Sent!" : label}</span>
                 <span className="sm:hidden">{isSent ? "Sent!" : shortLabel}</span>
               </span>

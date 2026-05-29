@@ -122,6 +122,20 @@ class BidLog(models.Model):
         ordering = ["round_number", "seat"]
 
 
+class TeamSignalLog(models.Model):
+    """Records every team signal sent — at ANY point during the game, not just on your turn."""
+    game                          = models.ForeignKey(Game, on_delete=models.CASCADE, related_name="signal_logs")
+    round_number                  = models.PositiveSmallIntegerField(default=0)
+    trick_number                  = models.PositiveSmallIntegerField(default=0)
+    sender_seat                   = models.PositiveSmallIntegerField()
+    sender_username               = models.CharField(max_length=50)
+    signal                        = models.CharField(max_length=20)
+    cards_played_in_trick_at_time = models.PositiveSmallIntegerField(default=0)  # 0=before anyone played
+
+    class Meta:
+        ordering = ["round_number", "trick_number", "id"]
+
+
 class Spectator(models.Model):
     game          = models.ForeignKey(Game, on_delete=models.CASCADE, related_name="spectators")
     username      = models.CharField(max_length=50)
