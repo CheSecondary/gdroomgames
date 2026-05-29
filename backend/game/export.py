@@ -179,6 +179,11 @@ def build_game_log(game_code: str) -> list:
         tricks_list = list(rnd.tricks.order_by("number"))
         total_tricks_this_round = rnd.cards_per_player
 
+        # Accumulates fully completed tricks within this round so each card_play
+        # event can see the full play history — which suits have run out, who has
+        # been winning, whether a player voided a suit early, etc.
+        completed_tricks_history: list[dict] = []
+
         for trick in tricks_list:
             trick_cards = list(trick.cards.select_related("player").order_by("play_order"))
             if not trick_cards:
@@ -312,6 +317,10 @@ def build_game_log(game_code: str) -> list:
                         }
                         for s in sorted(scores.keys(), key=int)
                     ],
+                    # Prior tricks in this round (full card history)
+                    # Crucial for inferring: suit voids, card depletion, teammate patterns
+                    # e.g. "teammate threw off diamonds in trick 2 → likely void in diamonds now"
+                    "completed_tricks_this_round": list(completed_tricks_history),
                     # Decision
                     "card_played":  {"suit": tc.suit, "rank": tc.rank, "deck_id": tc.deck_id},
                     "team_signal_sent": tc.team_signal or None,   # signal sent to teammate before this play
@@ -325,6 +334,35 @@ def build_game_log(game_code: str) -> list:
                     "seat":     p.seat,
                     "username": p.username,
                     "card":     {"suit": tc.suit, "rank": tc.rank, "deck_id": tc.deck_id},
+                })
+
+            # ── After all plays in this trick, record it in history ───────────
+            if trick_cards:
+                winner_seat = next(
+                    (p.seat for p in players_all if p.id == trick.winner_id),
+                    None,
+                ) if trick.winner_id else None
+                completed_tricks_history.append({
+                    "trick_num":       trick.number,
+                    "lead_suit":       trick.lead_suit,
+                    "winner_seat":     winner_seat,
+                    "winner_username": seat_to_user.get(winner_seat) if winner_seat else None,
+                    "cards": [
+                        {
+                            "seat":       tc2.player.seat,
+                            "username":   tc2.player.username,
+                            "card":       {"suit": tc2.suit, "rank": tc2.rank},
+                            "play_order": tc2.play_order,
+                            # Did this player follow suit, trump, or throw off?
+                            # "follow"=followed lead suit, "trump"=played trump, "throw"=neither
+                            "play_type": (
+                                "follow" if tc2.suit == trick.lead_suit else
+                                "trump"  if tc2.suit == rnd.trump_suit  else
+                                "throw"
+                            ),
+                        }
+                        for tc2 in trick_cards
+                    ],
                 })
 
     return events

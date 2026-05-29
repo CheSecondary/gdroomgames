@@ -1108,11 +1108,11 @@ function MobileScoreStrip({
   );
 }
 
-const SIGNALS: { code: TeamSignal; emoji: string; label: string; color: string }[] = [
-  { code: "got_this", emoji: "✋", label: "I got this",    color: "bg-emerald-600/80 hover:bg-emerald-500 border-emerald-500/50" },
-  { code: "you_take", emoji: "👋", label: "You take it",   color: "bg-blue-600/80    hover:bg-blue-500    border-blue-500/50" },
-  { code: "covered",  emoji: "🔒", label: "Bid covered",   color: "bg-gray-600/80    hover:bg-gray-500    border-gray-500/50" },
-  { code: "need_one", emoji: "⚠️",  label: "Need one more", color: "bg-amber-600/80   hover:bg-amber-500   border-amber-500/50" },
+const SIGNALS: { code: TeamSignal; emoji: string; label: string; shortLabel: string; color: string; sentColor: string }[] = [
+  { code: "got_this", emoji: "✋", label: "I got this",    shortLabel: "Got this",  color: "bg-emerald-700/70 hover:bg-emerald-600/90 border-emerald-500/40", sentColor: "bg-emerald-500/90 border-emerald-400" },
+  { code: "you_take", emoji: "👋", label: "You take it",   shortLabel: "You take",  color: "bg-blue-700/70    hover:bg-blue-600/90    border-blue-500/40",    sentColor: "bg-blue-500/90    border-blue-400" },
+  { code: "covered",  emoji: "🔒", label: "Bid covered",   shortLabel: "Covered",   color: "bg-slate-700/70   hover:bg-slate-600/90   border-slate-500/40",   sentColor: "bg-slate-500/90   border-slate-400" },
+  { code: "need_one", emoji: "⚠️",  label: "Need one more", shortLabel: "Need one",  color: "bg-amber-700/70   hover:bg-amber-600/90   border-amber-500/40",   sentColor: "bg-amber-500/90   border-amber-400" },
 ];
 
 function TeamSignalButtons({
@@ -1125,25 +1125,42 @@ function TeamSignalButtons({
   const handleClick = (code: TeamSignal) => {
     onSend(code);
     setSent(code);
-    setTimeout(() => setSent(null), 1500);
+    setTimeout(() => setSent(null), 1800);
   };
 
   return (
-    <div className="flex flex-wrap gap-1.5 justify-center px-1 py-1.5">
-      {SIGNALS.map(({ code, emoji, label, color }) => (
-        <button
-          key={code}
-          onClick={() => handleClick(code)}
-          className={`
-            flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-all
-            ${color} text-white
-            ${sent === code ? "scale-95 opacity-60" : "active:scale-95"}
-          `}
-        >
-          <span>{emoji}</span>
-          <span className="hidden sm:inline">{label}</span>
-        </button>
-      ))}
+    <div className="px-1 pt-1 pb-1.5">
+      {/* Header */}
+      <p className="text-[10px] text-gray-500 text-center mb-1.5 tracking-wide uppercase">
+        Signal teammate
+      </p>
+      {/* 2×2 grid on narrow mobile, 4-in-a-row on wider */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+        {SIGNALS.map(({ code, emoji, label, shortLabel, color, sentColor }) => {
+          const isSent = sent === code;
+          return (
+            <button
+              key={code}
+              onClick={() => handleClick(code)}
+              disabled={isSent}
+              title={label}
+              className={`
+                flex items-center justify-center gap-1.5 px-2 py-1.5
+                rounded-lg text-xs font-medium border transition-all duration-150
+                text-white active:scale-95
+                ${isSent ? `${sentColor} scale-95` : color}
+              `}
+            >
+              <span className="text-sm leading-none">{isSent ? "✓" : emoji}</span>
+              <span className="leading-tight">
+                {/* Full label on desktop, short on mobile */}
+                <span className="hidden sm:inline">{isSent ? "Sent!" : label}</span>
+                <span className="sm:hidden">{isSent ? "Sent!" : shortLabel}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
