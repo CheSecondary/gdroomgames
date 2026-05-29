@@ -504,20 +504,8 @@ def build_game_log(game_code: str) -> list:
                         trick.lead_suit != "" and
                         not any(c["suit"] == trick.lead_suit for c in (tc.hand_before or []))
                     ),
-                    # Flat list of every card played in completed tricks this round.
-                    # Enables full card counting: which high cards are still live?
-                    "cards_played_this_round": [
-                        {
-                            "suit":      c["card"]["suit"],
-                            "rank":      c["card"]["rank"],
-                            "seat":      c["seat"],
-                            "trick_num": t["trick_num"],
-                            "play_type": c["play_type"],
-                        }
-                        for t in completed_tricks_history
-                        for c in t["cards"]
-                    ],
                     # How many trump cards have already been played this round?
+                    # (Flat card list derivable from completed_tricks_this_round — omitted to save ~1MB/game)
                     # Low count → trumps still dangerous; high count → field is clearer
                     "trumps_played_this_round": sum(
                         1 for t in completed_tricks_history
