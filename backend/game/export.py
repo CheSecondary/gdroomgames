@@ -177,7 +177,6 @@ def build_game_log(game_code: str) -> list:
             "players",
             "rounds__tricks__cards__player",
             "bid_logs",
-            "signal_logs",
         ).get(code=game_code)
     except Game.DoesNotExist:
         return []
@@ -330,23 +329,6 @@ def build_game_log(game_code: str) -> list:
             "tricks_won_this_round":  tricks_won,
             "bid_outcome":            bid_outcome,       # "made" | "overtrick" | "set" | null
             "team_bid_outcome":       team_bid_outcome,  # same, for the whole team
-        })
-
-    # ── 2b. Team signal events ─────────────────────────────────────────────────
-    for sl in game.signal_logs.order_by("round_number", "trick_number", "id"):
-        events.append({
-            "event":           "team_signal",
-            "game_code":       game.code,
-            "round":           sl.round_number,
-            "trick_num":       sl.trick_number,
-            "signal":          sl.signal,
-            "sender_seat":     sl.sender_seat,
-            "sender_username": sl.sender_username,
-            # How many players had already played in this trick when signal was sent?
-            # 0 = proactive (sent before trick starts or early)
-            # N = reactive (sent after seeing N cards played)
-            "cards_in_trick_when_sent": sl.cards_played_in_trick_at_time,
-            "teams_enabled":   game.teams_enabled,
         })
 
     # ── 3. Card play decisions ────────────────────────────────────────────────
@@ -552,7 +534,6 @@ def build_game_log(game_code: str) -> list:
                     "completed_tricks_this_round": list(completed_tricks_history),
                     # Decision
                     "card_played":  {"suit": tc.suit, "rank": tc.rank, "deck_id": tc.deck_id},
-                    "team_signal_sent": tc.team_signal or None,   # signal sent to teammate before this play
                     "won_trick":    trick.winner_id == p.id if trick.winner_id else False,
                     # Round outcome (labelled — key training signal)
                     "tricks_won_this_round": rnd_tricks,

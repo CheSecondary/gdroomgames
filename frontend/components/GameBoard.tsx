@@ -8,7 +8,7 @@ import RoundSummary from "./RoundSummary";
 import VoiceChat from "./VoiceChat";
 import type { GameState, Card as CardType, RoundScore } from "@/lib/types";
 import { TEAM_COLORS } from "@/lib/types";
-import type { ChatMessage, PeekStatus, TakeoverStatus, TeamSignal, TeamSignalEvent } from "@/lib/useGameSocket";
+import type { ChatMessage, PeekStatus, TakeoverStatus } from "@/lib/useGameSocket";
 
 interface Props {
   state: GameState;
@@ -42,9 +42,6 @@ interface Props {
   onRequestTakeover?: (targetSeat: number) => void;
   onAcceptTakeover?: (requester: string) => void;
   onDeclineTakeover?: (requester: string) => void;
-  // Team quick-signals
-  teamSignal?: TeamSignalEvent | null;
-  onSendTeamSignal?: (signal: TeamSignal) => void;
 }
 
 const SUIT_ORDER: Record<string, number> = { spades: 0, hearts: 1, diamonds: 2, clubs: 3 };
@@ -86,8 +83,6 @@ export default function GameBoard({
   onRequestTakeover,
   onAcceptTakeover,
   onDeclineTakeover,
-  teamSignal,
-  onSendTeamSignal,
 }: Props) {
   const [ownershipToast, setOwnershipToast] = useState<string | null>(null);
   const [selectedCard,   setSelectedCard]   = useState<string | null>(null);
@@ -379,13 +374,6 @@ export default function GameBoard({
         )}
       </AnimatePresence>
 
-      {/* ── Team signal received toast ───────────────────────────────────────── */}
-      <div className="fixed top-4 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
-        <AnimatePresence>
-          {teamSignal && <TeamSignalToast signal={teamSignal} />}
-        </AnimatePresence>
-      </div>
-
       {/* ── Ownership transfer toast (all players) ───────────────────────────── */}
       <AnimatePresence>
         {ownershipToast && (
@@ -665,17 +653,6 @@ export default function GameBoard({
                   </span>
                 )}
               </div>
-
-              {/* Team signal buttons — show any time during play, not just on your turn */}
-              {state.teams_enabled && !isSpectator && state.status === "playing" && onSendTeamSignal && (
-                <TeamSignalButtons onSend={onSendTeamSignal} />
-              )}
-              {/* Hint when playing multi-player without teams mode */}
-              {!state.teams_enabled && !isSpectator && state.status === "playing" && state.players.length >= 4 && (
-                <p className="text-[10px] text-gray-600 text-center py-1 px-2">
-                  💡 Create with <span className="text-gray-400">Teams mode</span> to unlock signals
-                </p>
-              )}
 
               {/* Cards — flex-wrap, fully visible, no overlap */}
               <div className="flex-1 overflow-y-auto">
@@ -1111,88 +1088,6 @@ function MobileScoreStrip({
         </div>
       ))}
     </div>
-  );
-}
-
-const SIGNALS: { code: TeamSignal; emoji: string; label: string; shortLabel: string; color: string; sentColor: string }[] = [
-  { code: "got_this", emoji: "✋", label: "I got this",    shortLabel: "Got this",  color: "bg-emerald-700/70 hover:bg-emerald-600/90 border-emerald-500/40", sentColor: "bg-emerald-500/90 border-emerald-400" },
-  { code: "you_take", emoji: "👋", label: "You take it",   shortLabel: "You take",  color: "bg-blue-700/70    hover:bg-blue-600/90    border-blue-500/40",    sentColor: "bg-blue-500/90    border-blue-400" },
-  { code: "covered",  emoji: "🔒", label: "Bid covered",   shortLabel: "Covered",   color: "bg-slate-700/70   hover:bg-slate-600/90   border-slate-500/40",   sentColor: "bg-slate-500/90   border-slate-400" },
-  { code: "need_one", emoji: "⚠️",  label: "Need one more", shortLabel: "Need one",  color: "bg-amber-700/70   hover:bg-amber-600/90   border-amber-500/40",   sentColor: "bg-amber-500/90   border-amber-400" },
-];
-
-function TeamSignalButtons({
-  onSend,
-}: {
-  onSend: (signal: TeamSignal) => void;
-}) {
-  const [lastSent, setLastSent] = useState<{ code: TeamSignal; at: number } | null>(null);
-
-  const handleClick = (code: TeamSignal) => {
-    onSend(code);
-    setLastSent({ code, at: Date.now() });
-    // Allow re-click immediately — flash clears after 600ms
-    setTimeout(() => setLastSent((prev) => (prev?.code === code ? null : prev)), 600);
-  };
-
-  return (
-    <div className="px-1 pt-1 pb-1.5">
-      <p className="text-[10px] text-gray-500 text-center mb-1.5 tracking-wide uppercase">
-        Signal teammate
-      </p>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-        {SIGNALS.map(({ code, emoji, label, shortLabel, color, sentColor }) => {
-          const isSent = lastSent?.code === code;
-          return (
-            <button
-              key={code}
-              onClick={() => handleClick(code)}
-              title={label}
-              className={`
-                flex items-center justify-center gap-1.5 px-2 py-1.5
-                rounded-lg text-xs font-medium border transition-all duration-150
-                text-white active:scale-95
-                ${isSent ? `${sentColor} scale-95` : color}
-              `}
-            >
-              <span className="text-sm leading-none">{isSent ? "✓" : emoji}</span>
-              <span className="leading-tight">
-                <span className="hidden sm:inline">{isSent ? "Sent!" : label}</span>
-                <span className="sm:hidden">{isSent ? "Sent!" : shortLabel}</span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-const SIGNAL_DISPLAY: Record<TeamSignal, { emoji: string; label: string; color: string }> = {
-  got_this: { emoji: "✋", label: "I got this",    color: "border-emerald-500/60 bg-emerald-900/80" },
-  you_take: { emoji: "👋", label: "You take it",   color: "border-blue-500/60    bg-blue-900/80" },
-  covered:  { emoji: "🔒", label: "Bid covered",   color: "border-gray-500/60    bg-gray-800/90" },
-  need_one: { emoji: "⚠️",  label: "Need one more", color: "border-amber-500/60   bg-amber-900/80" },
-};
-
-function TeamSignalToast({ signal }: { signal: TeamSignalEvent }) {
-  const d = SIGNAL_DISPLAY[signal.signal];
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -12, scale: 0.92 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: -8, scale: 0.92 }}
-      className={`
-        flex items-center gap-2 px-3 py-2 rounded-xl border text-sm font-medium text-white
-        shadow-lg backdrop-blur-sm ${d.color}
-      `}
-    >
-      <span className="text-base">{d.emoji}</span>
-      <span>
-        <span className="text-gray-300 text-xs">{signal.fromUsername}: </span>
-        {d.label}
-      </span>
-    </motion.div>
   );
 }
 

@@ -2,7 +2,7 @@ import json
 from urllib.parse import parse_qs
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
-from .models import Game, Player, Round, Trick, TrickCard, Spectator, BidLog, TeamSignalLog
+from .models import Game, Player, Round, Trick, TrickCard, Spectator, BidLog
 from . import engine
 
 
@@ -33,17 +33,12 @@ def find_next_idx(current: int, n: int, predicate) -> int:
 
 class GameConsumer(AsyncWebsocketConsumer):
 
-    _channels: dict = {}  # (game_code, username) -> channel_name
-
     async def connect(self):
         self.game_code  = self.scope["url_route"]["kwargs"]["game_code"]
         self.room_group = f"game_{self.game_code}"
         qs = parse_qs(self.scope.get("query_string", b"").decode())
         self.username   = (qs.get("username", ["Anonymous"])[0])[:50].strip() or "Anonymous"
         spectate_seat   = qs.get("spectate", [None])[0]
-
-        self.pending_signal = None
-        GameConsumer._channels[(self.game_code, self.username)] = self.channel_name
 
         await self.channel_layer.group_add(self.room_group, self.channel_name)
         await self.accept()
@@ -54,7 +49,6 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.broadcast_state()
 
     async def disconnect(self, code):
-        GameConsumer._channels.pop((self.game_code, self.username), None)
         await self.set_connected(False)
         await self.channel_layer.group_discard(self.room_group, self.channel_name)
         await self.broadcast_state()
@@ -76,7 +70,6 @@ class GameConsumer(AsyncWebsocketConsumer):
             "request_takeover": self.handle_request_takeover,
             "accept_takeover":  self.handle_accept_takeover,
             "decline_takeover": self.handle_decline_takeover,
-            "send_team_signal": self.handle_send_team_signal,
         }
         handler = handlers.get(data.get("action"))
         if handler:
@@ -143,9 +136,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.send_error(reason)
             return
 
-        signal = self.pending_signal
-        self.pending_signal = None
-        await self.db_play_card(game, player, card, signal)
+        await self.db_play_card(game, player, card)
         await self.advance_play_turn(game)
 
     async def handle_end_game(self, data):
@@ -294,30 +285,6 @@ class GameConsumer(AsyncWebsocketConsumer):
                 "accepted": False,
             }
         )
-
-    async def handle_send_team_signal(self, data):
-        signal = data.get("signal")
-        if signal not in {"got_this", "you_take", "covered", "need_one"}:
-            return
-        game = await self.get_game()
-        if not game.teams_enabled:
-            return
-        player = await self.get_player_by_username(game)
-        if player is None:
-            return
-        my_seat = player.seat
-        teammate_seats = [s for team in game.teams if my_seat in team for s in team if s != my_seat]
-        teammate_usernames = await self.get_usernames_for_seats(game, teammate_seats)
-        for uname in teammate_usernames:
-            ch = GameConsumer._channels.get((self.game_code, uname))
-            if ch:
-                await self.channel_layer.send(ch, {
-                    "type": "team_signal_msg",
-                    "signal": signal,
-                    "from_username": self.username,
-                })
-        self.pending_signal = signal
-        await self.db_log_team_signal(game, player, signal)
 
     async def handle_extend_game(self, data):
         game = await self.get_game()
@@ -629,13 +596,6 @@ class GameConsumer(AsyncWebsocketConsumer):
             "seat": event["seat"],
         }))
 
-    async def team_signal_msg(self, event):
-        await self.send(text_data=json.dumps({
-            "type": "team_signal",
-            "signal": event["signal"],
-            "from_username": event["from_username"],
-        }))
-
     async def send_error(self, message):
         await self.send(text_data=json.dumps({"type": "error", "message": message}))
 
@@ -772,30 +732,6 @@ class GameConsumer(AsyncWebsocketConsumer):
         return game.players.filter(username=self.username).first()
 
     @database_sync_to_async
-    def get_usernames_for_seats(self, game, seats):
-        return list(game.players.filter(seat__in=seats).values_list("username", flat=True))
-
-    @database_sync_to_async
-    def db_log_team_signal(self, game, player, signal):
-        cur_round = game.rounds.filter(is_complete=False).order_by("-number").first()
-        trick_number = 0
-        cards_in_trick = 0
-        if cur_round:
-            cur_trick = cur_round.tricks.filter(is_complete=False).order_by("-number").first()
-            if cur_trick:
-                trick_number = cur_trick.number
-                cards_in_trick = cur_trick.cards.count()
-        TeamSignalLog.objects.create(
-            game=game,
-            round_number=cur_round.number if cur_round else 0,
-            trick_number=trick_number,
-            sender_seat=player.seat,
-            sender_username=player.username,
-            signal=signal,
-            cards_played_in_trick_at_time=cards_in_trick,
-        )
-
-    @database_sync_to_async
     def get_current_trick(self, game):
         r = game.rounds.filter(is_complete=False).order_by("-number").first()
         return r.tricks.filter(is_complete=False).order_by("-number").first() if r else None
@@ -926,7 +862,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         return Trick.objects.create(round=r, number=r.tricks.count() + 1)
 
     @database_sync_to_async
-    def db_play_card(self, game, player, card, team_signal=None):
+    def db_play_card(self, game, player, card):
         r     = game.rounds.filter(is_complete=False).order_by("-number").first()
         trick = r.tricks.filter(is_complete=False).order_by("-number").first()
         order = trick.cards.count()
@@ -942,7 +878,6 @@ class GameConsumer(AsyncWebsocketConsumer):
             all_scores_snapshot={str(p.seat): p.total_score  for p in all_players},
             all_tricks_snapshot={str(p.seat): p.tricks_won   for p in all_players},
             all_bids_snapshot  ={str(p.seat): p.bid          for p in all_players},
-            team_signal=team_signal or "",
         )
         player.hand = [
             c for c in player.hand

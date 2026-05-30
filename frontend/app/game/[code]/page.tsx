@@ -39,7 +39,6 @@ export default function GamePage() {
     extendGame, finishGame,
     peekStatus, peekRequest, requestPeek, acceptPeek, declinePeek,
     takeoverStatus, takeoverRequest, handedOff, requestTakeover, acceptTakeover, declineTakeover,
-    teamSignal, sendTeamSignal,
   } = useGameSocket(code, username ?? "", spectateSeat, takeoverSeat);
 
   // Auto-send peek/takeover request once state arrives
@@ -124,8 +123,6 @@ export default function GamePage() {
       onRequestTakeover={requestTakeover}
       onAcceptTakeover={acceptTakeover}
       onDeclineTakeover={declineTakeover}
-      teamSignal={teamSignal}
-      onSendTeamSignal={sendTeamSignal}
     />
   );
 }

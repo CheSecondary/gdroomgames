@@ -15,12 +15,6 @@ export interface ChatMessage {
 export type PeekStatus     = "idle" | "pending" | "accepted" | "declined";
 export type TakeoverStatus = "idle" | "pending" | "declined";
 
-export type TeamSignal = "got_this" | "you_take" | "covered" | "need_one";
-export interface TeamSignalEvent {
-  signal: TeamSignal;
-  fromUsername: string;
-}
-
 export function useGameSocket(gameCode: string, username: string, spectateSeat?: number, takeoverSeat?: number) {
   const ws = useRef<WebSocket | null>(null);
   const [state, setState] = useState<GameState | null>(null);
@@ -34,8 +28,6 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
   const [takeoverStatus, setTakeoverStatus] = useState<TakeoverStatus>("idle");
   const [takeoverRequest, setTakeoverRequest] = useState<{ requester: string; targetSeat: number } | null>(null);
   const [handedOff, setHandedOff] = useState<{ to: string; from: string; seat: number } | null>(null);
-  const [teamSignal, setTeamSignal] = useState<TeamSignalEvent | null>(null);
-  const teamSignalTimer = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (!username) return;
@@ -100,10 +92,6 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
             setTakeoverStatus("idle"); // accepted — now a normal player
             setTakeoverRequest(null);
           }
-        } else if (msg.type === "team_signal") {
-          if (teamSignalTimer.current) clearTimeout(teamSignalTimer.current);
-          setTeamSignal({ signal: msg.signal, fromUsername: msg.from_username });
-          teamSignalTimer.current = setTimeout(() => setTeamSignal(null), 4000);
         } else if (msg.type === "game_cancelled") {
           window.location.href = "/lobby";
         }
@@ -171,11 +159,6 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
     setTakeoverRequest(null);
   }, [send]);
 
-  const sendTeamSignal = useCallback(
-    (signal: TeamSignal) => send({ action: "send_team_signal", signal }),
-    [send]
-  );
-
   return {
     state,
     error,
@@ -203,7 +186,5 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
     requestTakeover,
     acceptTakeover,
     declineTakeover,
-    teamSignal,
-    sendTeamSignal,
   };
 }
