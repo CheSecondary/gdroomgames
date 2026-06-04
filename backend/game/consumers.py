@@ -556,10 +556,13 @@ class GameConsumer(AsyncWebsocketConsumer):
     # ── Broadcast ─────────────────────────────────────────────────────────────
 
     async def trigger_export(self, game_code):
-        """Fire-and-forget: send state snapshot to Telegram in background thread."""
+        """Build snapshot NOW (before status changes), send to Telegram in background."""
         import asyncio
-        from .export import send_snapshot_to_telegram
-        asyncio.create_task(asyncio.to_thread(send_snapshot_to_telegram, game_code))
+        from .export import build_game_snapshot, send_snapshot_to_telegram
+        # Build synchronously while game is still in its true state
+        snap = await database_sync_to_async(build_game_snapshot)(game_code)
+        if snap:
+            asyncio.create_task(asyncio.to_thread(send_snapshot_to_telegram, snap))
 
     async def broadcast_state(self):
         state = await self.build_state()

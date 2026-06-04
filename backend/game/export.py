@@ -86,22 +86,18 @@ def build_game_snapshot(game_code: str) -> dict | None:
     }
 
 
-def send_snapshot_to_telegram(game_code: str):
-    """Fire-and-forget: send state snapshot to Telegram."""
+def send_snapshot_to_telegram(snap: dict):
+    """Send a pre-built snapshot dict to Telegram."""
     token   = settings.TELEGRAM_BOT_TOKEN
     chat_id = settings.TELEGRAM_CHAT_ID
     if not token or not chat_id:
         return
 
-    snap = build_game_snapshot(game_code)
-    if not snap:
-        return
-
-    content  = json.dumps(snap, ensure_ascii=False)
-    filename = f"openspades_{game_code}.json"
-
-    players  = ", ".join(p["username"] for p in snap["players"])
-    caption  = (
+    game_code = snap.get("code", "UNKNOWN")
+    content   = json.dumps(snap, ensure_ascii=False)
+    filename  = f"openspades_{game_code}.json"
+    players   = ", ".join(p["username"] for p in snap["players"])
+    caption   = (
         f"🃏 *OpenSpades Snapshot*\n"
         f"Code: `{game_code}` · R{snap['current_round']}/{snap['max_rounds']}\n"
         f"Status at save: `{snap['status']}`\n"
