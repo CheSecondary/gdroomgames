@@ -1,14 +1,12 @@
 import json
 import random
 import string
-from django.http import HttpResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from .models import Game, Player
 from .serializers import GameSerializer
-from .export import build_game_snapshot
 
 
 def parse_snapshot(content: str) -> dict:
@@ -206,27 +204,6 @@ class HealthCheckView(APIView):
 
     def get(self, request):
         return Response({"status": "ok"}, status=status.HTTP_200_OK)
-
-
-class GameSnapshotView(APIView):
-    """
-    GET /api/game/<code>/snapshot/
-    Returns the full game state snapshot as a downloadable .json file.
-    Available to all players (and spectators) — serves as a local backup
-    of the same snapshot sent to Telegram.
-    """
-    permission_classes = [AllowAny]
-
-    def get(self, request, code):
-        snap = build_game_snapshot(code.upper())
-        if snap is None:
-            return Response({"error": "Game not found."}, status=404)
-
-        content  = json.dumps(snap, ensure_ascii=False, indent=2)
-        filename = f"openspades_{code.upper()}.json"
-        response = HttpResponse(content, content_type="application/json")
-        response["Content-Disposition"] = f'attachment; filename="{filename}"'
-        return response
 
 
 class ResumeFromExportView(APIView):
