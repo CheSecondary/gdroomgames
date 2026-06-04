@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { useGameSocket } from "@/lib/useGameSocket";
+import type { GameStartOverrides } from "@/lib/useGameSocket";
 import WaitingRoom from "@/components/WaitingRoom";
 import GameBoard from "@/components/GameBoard";
 
@@ -85,7 +86,7 @@ export default function GamePage() {
         state={state}
         username={username}
         gameCode={code}
-        onStartGame={startGame}
+        onStartGame={(overrides?: GameStartOverrides) => startGame(overrides)}
         onCancelGame={cancelGame}
       />
     );

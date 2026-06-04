@@ -86,16 +86,28 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.send_error("Need at least 2 players to start.")
             return
 
+        # Optional manual overrides from host
+        seat_order     = data.get("seat_order")       # [username, ...] — desired seat assignment
+        lead_override  = data.get("lead_player_index")  # which seat bids/plays first
+        score_override = data.get("score_override", {})  # {username: score}
+
+        if seat_order:
+            await self.db_reassign_seats(game, seat_order)
+            players = await self.get_players(game)
+
+        if score_override:
+            await self.db_apply_score_overrides(game, score_override)
+
         actual_max = engine.max_rounds(len(players), game.num_decks)
-        # game.max_rounds is set to the host's choice at creation (0 = use formula)
         chosen = game.max_rounds
         max_r  = min(chosen, actual_max) if chosen > 0 else actual_max
 
-        # Assign teams only if enabled AND player count is valid (even, ≥ 4)
         teams_valid = game.teams_enabled and len(players) >= 4 and len(players) % 2 == 0
         teams = engine.assign_teams([p.seat for p in players]) if teams_valid else []
 
-        await self.db_start_game(game, max_r, teams, teams_enabled=teams_valid)
+        lead_idx = lead_override if (lead_override is not None and 0 <= lead_override < len(players)) else 0
+
+        await self.db_start_game(game, max_r, teams, teams_enabled=teams_valid, lead_player_index=lead_idx)
         await self.start_new_round(game)
 
     async def handle_place_bid(self, data):
@@ -789,11 +801,34 @@ class GameConsumer(AsyncWebsocketConsumer):
         game.delete()
 
     @database_sync_to_async
-    def db_start_game(self, game, max_r, teams, teams_enabled=None):
-        game.status        = Game.STATUS_BIDDING
-        game.current_round = game.start_round
-        game.max_rounds    = max_r
-        game.teams         = teams
+    def db_reassign_seats(self, game, seat_order):
+        players = {p.username: p for p in game.players.all()}
+        # Pass 1: shift to negative to avoid unique-seat conflicts during reorder
+        for i, username in enumerate(seat_order):
+            if username in players:
+                players[username].seat = -(i + 1)
+                players[username].save()
+        # Pass 2: assign final seats
+        for i, username in enumerate(seat_order):
+            if username in players:
+                players[username].seat = i
+                players[username].save()
+
+    @database_sync_to_async
+    def db_apply_score_overrides(self, game, score_override):
+        for username, score in score_override.items():
+            try:
+                game.players.filter(username=username).update(total_score=int(score))
+            except (ValueError, TypeError):
+                pass
+
+    @database_sync_to_async
+    def db_start_game(self, game, max_r, teams, teams_enabled=None, lead_player_index=0):
+        game.status             = Game.STATUS_BIDDING
+        game.current_round      = game.start_round
+        game.max_rounds         = max_r
+        game.teams              = teams
+        game.lead_player_index  = lead_player_index
         if teams_enabled is not None:
             game.teams_enabled = teams_enabled
         game.save()

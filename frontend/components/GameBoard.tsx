@@ -1145,6 +1145,9 @@ function GameOverBanner({
         <p className="text-xs text-gray-500 mt-2.5 flex items-center justify-center gap-1">
           <span>📊</span> Game data saved for AI training
         </p>
+        <p className="text-[10px] text-gray-700 mt-1">
+          Seat order: {[...players].sort((a, b) => a.seat - b.seat).map(p => `#${p.seat + 1} ${p.username}`).join(" · ")}
+        </p>
       </motion.div>
     );
   }
@@ -1175,6 +1178,9 @@ function GameOverBanner({
       </button>
       <p className="text-xs text-gray-500 mt-2.5 flex items-center justify-center gap-1">
         <span>📊</span> Game data saved for AI training
+      </p>
+      <p className="text-[10px] text-gray-700 mt-1">
+        Seat order: {[...players].sort((a, b) => a.seat - b.seat).map(p => `#${p.seat + 1} ${p.username}`).join(" · ")}
       </p>
     </motion.div>
   );

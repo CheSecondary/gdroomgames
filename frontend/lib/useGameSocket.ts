@@ -15,6 +15,12 @@ export interface ChatMessage {
 export type PeekStatus     = "idle" | "pending" | "accepted" | "declined";
 export type TakeoverStatus = "idle" | "pending" | "declined";
 
+export interface GameStartOverrides {
+  seatOrder?: string[];
+  leadPlayerIndex?: number;
+  scoreOverride?: Record<string, number>;
+}
+
 export function useGameSocket(gameCode: string, username: string, spectateSeat?: number, takeoverSeat?: number) {
   const ws = useRef<WebSocket | null>(null);
   const [state, setState] = useState<GameState | null>(null);
@@ -125,7 +131,12 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
     }
   }, []);
 
-  const startGame    = useCallback(() => send({ action: "start_game" }), [send]);
+  const startGame    = useCallback((overrides?: GameStartOverrides) => send({
+    action: "start_game",
+    ...(overrides?.seatOrder        && { seat_order: overrides.seatOrder }),
+    ...(overrides?.leadPlayerIndex != null && { lead_player_index: overrides.leadPlayerIndex }),
+    ...(overrides?.scoreOverride    && { score_override: overrides.scoreOverride }),
+  }), [send]);
   const cancelGame   = useCallback(() => send({ action: "cancel_game" }), [send]);
   const placeBid     = useCallback((bid: number) => send({ action: "place_bid", bid }), [send]);
   const playCard     = useCallback((card: Card) => send({ action: "play_card", card }), [send]);
