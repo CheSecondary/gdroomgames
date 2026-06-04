@@ -98,6 +98,10 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
             setTakeoverStatus("idle"); // accepted — now a normal player
             setTakeoverRequest(null);
           }
+        } else if (msg.type === "player_kicked") {
+          if (msg.username === username) {
+            window.location.href = "/lobby";
+          }
         } else if (msg.type === "game_cancelled") {
           window.location.href = "/lobby";
         }
@@ -138,6 +142,7 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
     ...(overrides?.scoreOverride    && { score_override: overrides.scoreOverride }),
   }), [send]);
   const cancelGame   = useCallback(() => send({ action: "cancel_game" }), [send]);
+  const kickPlayer   = useCallback((targetUsername: string) => send({ action: "kick_player", target_username: targetUsername }), [send]);
   const placeBid     = useCallback((bid: number) => send({ action: "place_bid", bid }), [send]);
   const playCard     = useCallback((card: Card) => send({ action: "play_card", card }), [send]);
   const endGame      = useCallback(() => send({ action: "end_game" }), [send]);
@@ -185,6 +190,7 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
     clearSummary,
     startGame,
     cancelGame,
+    kickPlayer,
     placeBid,
     playCard,
     endGame,

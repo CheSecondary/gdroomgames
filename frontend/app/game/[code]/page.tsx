@@ -36,7 +36,7 @@ export default function GamePage() {
 
   const {
     state, error, connected, roundSummary, trickWinner, clearSummary,
-    startGame, cancelGame, placeBid, playCard, endGame, chatMessages, sendChat,
+    startGame, cancelGame, kickPlayer, placeBid, playCard, endGame, chatMessages, sendChat,
     extendGame, finishGame,
     peekStatus, peekRequest, requestPeek, acceptPeek, declinePeek,
     takeoverStatus, takeoverRequest, handedOff, requestTakeover, acceptTakeover, declineTakeover,
@@ -88,6 +88,7 @@ export default function GamePage() {
         gameCode={code}
         onStartGame={(overrides?: GameStartOverrides) => startGame(overrides)}
         onCancelGame={cancelGame}
+        onKickPlayer={kickPlayer}
       />
     );
   }

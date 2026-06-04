@@ -67,6 +67,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             "request_peek":     self.handle_request_peek,
             "accept_peek":      self.handle_accept_peek,
             "decline_peek":     self.handle_decline_peek,
+            "kick_player":      self.handle_kick_player,
             "request_takeover": self.handle_request_takeover,
             "accept_takeover":  self.handle_accept_takeover,
             "decline_takeover": self.handle_decline_takeover,
@@ -161,6 +162,20 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.db_update_game(game, status=Game.STATUS_FINISHED)
         await self.broadcast_state()
         await self.trigger_export(game.code)
+
+    async def handle_kick_player(self, data):
+        game = await self.get_game()
+        if game.host_username != self.username or game.status != Game.STATUS_WAITING:
+            return
+        target = data.get("target_username", "").strip()
+        if not target or target == game.host_username:
+            return
+        kicked = await self.db_kick_player(game, target)
+        if kicked:
+            await self.channel_layer.group_send(
+                self.room_group, {"type": "player_kicked_msg", "username": target}
+            )
+            await self.broadcast_state()
 
     async def handle_cancel_game(self, data):
         game = await self.get_game()
@@ -558,6 +573,9 @@ class GameConsumer(AsyncWebsocketConsumer):
             "seat": event["seat"],
         }))
 
+    async def player_kicked_msg(self, event):
+        await self.send(text_data=json.dumps({"type": "player_kicked", "username": event["username"]}))
+
     async def game_cancelled(self, event):
         await self.send(text_data=json.dumps({"type": "game_cancelled", "message": "Host cancelled the room."}))
 
@@ -795,6 +813,11 @@ class GameConsumer(AsyncWebsocketConsumer):
                 Spectator.objects.filter(
                     game__code=self.game_code, username=self.username
                 ).delete()
+
+    @database_sync_to_async
+    def db_kick_player(self, game, username):
+        deleted, _ = game.players.filter(username=username).delete()
+        return deleted > 0
 
     @database_sync_to_async
     def db_delete_game(self, game):

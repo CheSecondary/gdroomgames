@@ -1,3 +1,4 @@
+import json
 import random
 import string
 from rest_framework.views import APIView
@@ -6,6 +7,56 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny
 from .models import Game, Player
 from .serializers import GameSerializer
+
+
+def parse_export_jsonl(content: str) -> dict:
+    """
+    Parse an OpenSpades JSONL export and return resume info.
+    Raises ValueError with a user-facing message on any parse failure.
+    Only needs the game_summary line — everything is in there.
+    """
+    summary = None
+    for line in content.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("event") == "game_summary":
+            summary = event
+            break
+
+    if not summary:
+        raise ValueError(
+            "Could not find game_summary in the export. "
+            "Make sure you uploaded the correct .jsonl file."
+        )
+
+    players = summary.get("players", [])
+    if not players:
+        raise ValueError("No player data found in the export.")
+
+    players_sorted = sorted(players, key=lambda p: p["seat"])
+    resume_from    = summary.get("total_rounds", 1)
+    max_rounds     = summary.get("max_rounds", resume_from)
+
+    return {
+        "old_code":      summary.get("game_code", ""),
+        "num_decks":     summary.get("num_decks", 1),
+        "teams_enabled": summary.get("teams_enabled", False),
+        "max_rounds":    max_rounds,
+        "resume_from":   resume_from,
+        "players": [
+            {
+                "seat":     p["seat"],
+                "username": p["username"],
+                "score":    p.get("final_score", 0),
+            }
+            for p in players_sorted
+        ],
+    }
 
 
 def gen_code():
@@ -107,3 +158,69 @@ class HealthCheckView(APIView):
 
     def get(self, request):
         return Response({"status": "ok"}, status=status.HTTP_200_OK)
+
+
+class ResumeFromExportView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        host_username = request.data.get("username", "").strip()[:50]
+        content       = request.data.get("content", "")
+
+        if not host_username:
+            return Response({"error": "Username required."}, status=400)
+        if not content:
+            return Response({"error": "Export file content required."}, status=400)
+
+        try:
+            info = parse_export_jsonl(content)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=400)
+
+        players = info["players"]  # [{seat, username, score}]
+
+        # Try to reuse old room code; fall back to a fresh one if it's still in DB
+        old_code = info["old_code"].upper()
+        if old_code and not Game.objects.filter(code=old_code).exists():
+            code = old_code
+        else:
+            code = gen_code()
+
+        # Original host = player at seat 0 (CreateGameView always assigns seat 0 to host).
+        # We deliberately ignore the API caller's username here — whoever runs this tool
+        # is just reconstructing the room, they don't become the host.
+        original_host = players[0]["username"]  # players already sorted by seat
+
+        game = Game.objects.create(
+            code             = code,
+            host_username    = original_host,
+            status           = Game.STATUS_WAITING,
+            num_decks        = info["num_decks"],
+            teams_enabled    = info["teams_enabled"],
+            expected_players = len(players),
+            start_round      = info["resume_from"],
+            current_round    = info["resume_from"],
+            max_rounds       = info["max_rounds"],
+        )
+
+        # Pre-create all player slots with the right seats and carry-over scores.
+        # JoinGameView already returns early if a username already has a row in the game,
+        # so each original player just needs to join with their exact username.
+        for p in players:
+            Player.objects.create(
+                game        = game,
+                username    = p["username"],
+                seat        = p["seat"],
+                total_score = p["score"],
+            )
+
+        return Response({
+            "code":             code,
+            "original_code":    old_code,
+            "same_code":        code == old_code,
+            "resume_from_round": info["resume_from"],
+            "max_rounds":       info["max_rounds"],
+            "num_decks":        info["num_decks"],
+            "teams_enabled":    info["teams_enabled"],
+            "players":          players,
+        }, status=status.HTTP_201_CREATED)

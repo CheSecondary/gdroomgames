@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import type { GameState } from "@/lib/types";
 import type { GameStartOverrides } from "@/lib/useGameSocket";
@@ -10,6 +11,7 @@ interface Props {
   gameCode: string;
   onStartGame: (overrides?: GameStartOverrides) => void;
   onCancelGame: () => void;
+  onKickPlayer: (targetUsername: string) => void;
 }
 
 // Mirrors engine.assign_teams: seat i pairs with seat i+half
@@ -18,7 +20,7 @@ function previewTeams(order: string[]): string[][] {
   return Array.from({ length: half }, (_, i) => [order[i], order[i + half]].filter(Boolean));
 }
 
-export default function WaitingRoom({ state, username, gameCode, onStartGame, onCancelGame }: Props) {
+export default function WaitingRoom({ state, username, gameCode, onStartGame, onCancelGame, onKickPlayer }: Props) {
   const [copied,            setCopied]            = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [showControls,      setShowControls]      = useState(false);
@@ -76,6 +78,7 @@ export default function WaitingRoom({ state, username, gameCode, onStartGame, on
     onStartGame(Object.keys(overrides).length > 0 ? overrides : undefined);
   }
 
+  const router = useRouter();
   const isHost   = state.host_username === username;
   const joined   = state.players.length;
   const expected = state.expected_players;
@@ -156,7 +159,7 @@ export default function WaitingRoom({ state, username, gameCode, onStartGame, on
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ delay: 0.04 * seat, type: "spring", stiffness: 260, damping: 20 }}
                 className={`
-                  flex flex-col items-center gap-1 rounded-xl py-2.5 px-1 border transition-all
+                  relative flex flex-col items-center gap-1 rounded-xl py-2.5 px-1 border transition-all
                   ${player
                     ? isMe
                       ? "bg-yellow-400/10 border-yellow-400/50"
@@ -167,6 +170,16 @@ export default function WaitingRoom({ state, username, gameCode, onStartGame, on
               >
                 {player ? (
                   <>
+                    {/* Kick button — host only, not on self or the host slot */}
+                    {isHost && !isMe && !isHost_ && (
+                      <button
+                        onClick={() => onKickPlayer(player.username)}
+                        title={`Kick ${player.username}`}
+                        className="absolute top-1 right-1 w-4 h-4 flex items-center justify-center rounded-full bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white text-[10px] font-bold transition-all"
+                      >
+                        ×
+                      </button>
+                    )}
                     <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-extrabold shadow ${isMe ? "bg-yellow-400 text-gray-900" : "bg-white/20 text-white"}`}>
                       {player.username[0].toUpperCase()}
                     </div>
@@ -388,15 +401,25 @@ export default function WaitingRoom({ state, username, gameCode, onStartGame, on
             )}
           </>
         ) : (
-          <motion.p
-            animate={{ opacity: [0.5, 1, 0.5] }}
-            transition={{ repeat: Infinity, duration: 2 }}
-            className="text-gray-400 text-sm text-center"
-          >
-            Waiting for{" "}
-            <span className="text-white font-semibold">{state.host_username}</span>{" "}
-            to start…
-          </motion.p>
+          <div className="flex flex-col items-center gap-3">
+            <motion.p
+              animate={{ opacity: [0.5, 1, 0.5] }}
+              transition={{ repeat: Infinity, duration: 2 }}
+              className="text-gray-400 text-sm text-center"
+            >
+              Waiting for{" "}
+              <span className="text-white font-semibold">{state.host_username}</span>{" "}
+              to start…
+            </motion.p>
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => router.push("/")}
+              className="text-xs px-5 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-gray-500 hover:text-gray-300 font-semibold transition-all"
+            >
+              ← Leave Room
+            </motion.button>
+          </div>
         )}
       </motion.div>
 

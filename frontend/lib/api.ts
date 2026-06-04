@@ -28,4 +28,10 @@ export const api = {
     req("/api/game/join/", { method: "POST", body: JSON.stringify({ username, code }) }),
 
   getGame: (code: string) => req(`/api/game/${code}/`),
+
+  resumeFromExport: (username: string, content: string) =>
+    req("/api/game/resume-export/", {
+      method: "POST",
+      body: JSON.stringify({ username, content }),
+    }),
 };
