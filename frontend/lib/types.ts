@@ -58,6 +58,7 @@ export interface GameState {
   teams: number[][];        // [[captain_seat, teammate_seat], ...]
   players: PlayerState[];
   current_trick: TrickCard[];
+  is_resume?: boolean;   // true while resume_snapshot is pending (cleared after host starts)
 }
 
 export interface RoundScore {

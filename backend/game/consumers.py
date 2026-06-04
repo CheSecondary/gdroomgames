@@ -87,6 +87,13 @@ class GameConsumer(AsyncWebsocketConsumer):
             await self.send_error("Need at least 2 players to start.")
             return
 
+        # ── Resume from snapshot — restores exact state, ignores all overrides ──
+        if game.resume_snapshot:
+            await self.db_restore_from_snapshot(game, game.resume_snapshot)
+            await self.broadcast_state()
+            return
+
+        # ── Normal start ────────────────────────────────────────────────────────
         # Optional manual overrides from host
         seat_order     = data.get("seat_order")       # [username, ...] — desired seat assignment
         lead_override  = data.get("lead_player_index")  # which seat bids/plays first
@@ -159,9 +166,10 @@ class GameConsumer(AsyncWebsocketConsumer):
             return
         if game.status == Game.STATUS_FINISHED:
             return
+        # Export BEFORE changing status so snapshot captures the true in-progress state
+        await self.trigger_export(game.code)
         await self.db_update_game(game, status=Game.STATUS_FINISHED)
         await self.broadcast_state()
-        await self.trigger_export(game.code)
 
     async def handle_kick_player(self, data):
         game = await self.get_game()
@@ -345,9 +353,10 @@ class GameConsumer(AsyncWebsocketConsumer):
         if game.status != Game.STATUS_PROMPT:
             return
 
+        # Export at PROMPT state (clean round end) before finishing
+        await self.trigger_export(game.code)
         await self.db_update_game(game, status=Game.STATUS_FINISHED)
         await self.broadcast_state()
-        await self.trigger_export(game.code)
 
     # ── Flow ──────────────────────────────────────────────────────────────────
 
@@ -502,10 +511,12 @@ class GameConsumer(AsyncWebsocketConsumer):
             actual_max = engine.max_rounds(len(players), game.num_decks)
             if game.max_rounds < actual_max:
                 await self.db_update_game(game, status=Game.STATUS_PROMPT)
+                await self.broadcast_state()
+                await self.trigger_export(game.code)   # snapshot at PROMPT — resumable
             else:
                 await self.db_update_game(game, status=Game.STATUS_FINISHED)
                 await self.trigger_export(game.code)
-            await self.broadcast_state()
+                await self.broadcast_state()
             return
 
         # Lead player index always rotates clockwise among all players, regardless of mode
@@ -545,10 +556,10 @@ class GameConsumer(AsyncWebsocketConsumer):
     # ── Broadcast ─────────────────────────────────────────────────────────────
 
     async def trigger_export(self, game_code):
-        """Fire-and-forget: send game log to Telegram in background thread."""
+        """Fire-and-forget: send state snapshot to Telegram in background thread."""
         import asyncio
-        from .export import send_game_log_to_telegram
-        asyncio.create_task(asyncio.to_thread(send_game_log_to_telegram, game_code))
+        from .export import send_snapshot_to_telegram
+        asyncio.create_task(asyncio.to_thread(send_snapshot_to_telegram, game_code))
 
     async def broadcast_state(self):
         state = await self.build_state()
@@ -710,6 +721,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             "game_code":      game.code,
             "host_username":  game.host_username,
             "status":         game.status,
+            "is_resume":      bool(game.resume_snapshot),
             "current_round":  game.current_round,
             "max_rounds":     game.max_rounds,
             "trump_suit":     game.trump_suit,
@@ -820,22 +832,86 @@ class GameConsumer(AsyncWebsocketConsumer):
         return deleted > 0
 
     @database_sync_to_async
+    def db_restore_from_snapshot(self, game, snap):
+        """Reconstruct exact game state from a saved snapshot."""
+        target_status = snap["status"]
+
+        # Restore all game fields from snapshot
+        game.status               = target_status
+        game.current_round        = snap["current_round"]
+        game.max_rounds           = snap["max_rounds"]
+        game.lead_player_index    = snap["lead_player_index"]
+        game.current_player_index = snap["current_player_index"]
+        game.trump_suit           = snap.get("trump_suit", "")
+        game.trump_card           = snap.get("trump_card")
+        game.teams                = snap.get("teams", [])
+        game.teams_enabled        = snap.get("teams_enabled", False)
+        game.resume_snapshot      = None   # consumed — clear it
+        game.save()
+
+        # Restore per-player state: hand, bid, tricks_won
+        # (total_score was already set when the room was created)
+        for p_data in snap["players"]:
+            game.players.filter(seat=p_data["seat"]).update(
+                hand       = p_data.get("hand", []),
+                bid        = p_data.get("bid", -1),
+                tricks_won = p_data.get("tricks_won", 0),
+            )
+
+        # Re-create Round + Trick objects if we were mid-round
+        if target_status in (Game.STATUS_BIDDING, Game.STATUS_PLAYING) and snap.get("trump_card"):
+            round_obj = Round.objects.create(
+                game             = game,
+                number           = snap["current_round"],
+                trump_suit       = snap["trump_suit"],
+                trump_card       = snap["trump_card"],
+                cards_per_player = snap["current_round"],  # round N = N cards each
+                is_complete      = False,
+            )
+
+            if target_status == Game.STATUS_PLAYING:
+                trick_num = snap.get("tricks_completed_this_round", 0) + 1
+                trick = Trick.objects.create(
+                    round     = round_obj,
+                    number    = trick_num,
+                    lead_suit = snap.get("trick_lead_suit", ""),
+                    is_complete = False,
+                )
+                # Re-create any cards already played in the current trick
+                for entry in snap.get("current_trick", []):
+                    player = game.players.get(seat=entry["seat"])
+                    TrickCard.objects.create(
+                        trick      = trick,
+                        player     = player,
+                        suit       = entry["card"]["suit"],
+                        rank       = entry["card"]["rank"],
+                        deck_id    = entry["card"].get("deck_id", 1),
+                        play_order = entry["play_order"],
+                        # Snapshots don't need ML fields — leave empty
+                        hand_before         = [],
+                        all_scores_snapshot = {},
+                        all_tricks_snapshot = {},
+                        all_bids_snapshot   = {},
+                    )
+
+    @database_sync_to_async
     def db_delete_game(self, game):
         game.delete()
 
     @database_sync_to_async
     def db_reassign_seats(self, game, seat_order):
         players = {p.username: p for p in game.players.all()}
-        # Pass 1: shift to negative to avoid unique-seat conflicts during reorder
+        # Pass 1: shift to high temp seats (100+) to avoid unique conflicts during reorder.
+        # Can't use negatives — PositiveSmallIntegerField has CHECK seat >= 0 at DB level.
         for i, username in enumerate(seat_order):
             if username in players:
-                players[username].seat = -(i + 1)
-                players[username].save()
+                players[username].seat = 100 + i
+                players[username].save(update_fields=["seat"])
         # Pass 2: assign final seats
         for i, username in enumerate(seat_order):
             if username in players:
                 players[username].seat = i
-                players[username].save()
+                players[username].save(update_fields=["seat"])
 
     @database_sync_to_async
     def db_apply_score_overrides(self, game, score_override):

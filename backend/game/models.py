@@ -39,6 +39,8 @@ class Game(models.Model):
     trump_card     = models.JSONField(default=dict, blank=True, null=True)
     current_player_index = models.PositiveSmallIntegerField(default=0)
     lead_player_index    = models.PositiveSmallIntegerField(default=0)
+    # Stored when importing a saved snapshot; consumed (cleared) when host starts
+    resume_snapshot = models.JSONField(null=True, blank=True, default=None)
     created_at     = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

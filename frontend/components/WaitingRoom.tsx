@@ -223,8 +223,8 @@ export default function WaitingRoom({ state, username, gameCode, onStartGame, on
         </div>
       </motion.div>
 
-      {/* ── Manual game controls (host only, collapsible) ─────────────────────── */}
-      {isHost && canStart && (
+      {/* ── Manual game controls (host only, collapsible, not shown for snapshot resumes) ── */}
+      {isHost && canStart && !state.is_resume && (
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
@@ -388,6 +388,11 @@ export default function WaitingRoom({ state, username, gameCode, onStartGame, on
               </motion.button>
             </div>
 
+            {state.is_resume && canStart && (
+              <p className="text-emerald-500/80 text-xs text-center">
+                ↩ Resuming saved game — seats, hands &amp; scores pre-loaded
+              </p>
+            )}
             {!canStart && (
               <p className="text-gray-600 text-xs">Need at least 2 players to start</p>
             )}

@@ -616,6 +616,7 @@ export default function GameBoard({
             players={state.players}
             teamsEnabled={state.teams_enabled}
             teams={state.teams}
+            gameCode={gameCode}
             onNewGame={() => { window.location.href = "/lobby"; }}
           />
         </div>
@@ -1095,13 +1096,35 @@ function GameOverBanner({
   players,
   teamsEnabled,
   teams,
+  gameCode,
   onNewGame,
 }: {
   players: GameState["players"];
   teamsEnabled: boolean;
   teams: number[][];
+  gameCode: string;
   onNewGame: () => void;
 }) {
+  const [downloading, setDownloading] = useState(false);
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? ""}/api/game/${gameCode}/snapshot/`);
+      if (!res.ok) throw new Error("Failed");
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `openspades_${gameCode}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Download failed — try again.");
+    } finally {
+      setDownloading(false);
+    }
+  };
   if (teamsEnabled && teams.length > 0) {
     const teamResults = teams
       .map((seats, ti) => {
@@ -1142,10 +1165,14 @@ function GameOverBanner({
         <button onClick={onNewGame} className="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2.5 rounded-xl">
           New Game →
         </button>
-        <p className="text-xs text-gray-500 mt-2.5 flex items-center justify-center gap-1">
-          <span>📊</span> Game data saved for AI training
-        </p>
-        <p className="text-[10px] text-gray-700 mt-1">
+        <button
+          onClick={handleDownload}
+          disabled={downloading}
+          className="w-full mt-2 bg-white/10 hover:bg-white/20 text-gray-300 text-sm font-medium py-2 rounded-xl border border-white/10 flex items-center justify-center gap-1.5 disabled:opacity-50"
+        >
+          <span>⬇️</span> {downloading ? "Downloading…" : "Download game snapshot"}
+        </button>
+        <p className="text-[10px] text-gray-700 mt-2">
           Seat order: {[...players].sort((a, b) => a.seat - b.seat).map(p => `#${p.seat + 1} ${p.username}`).join(" · ")}
         </p>
       </motion.div>
@@ -1176,10 +1203,14 @@ function GameOverBanner({
       <button onClick={onNewGame} className="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2.5 rounded-xl">
         New Game →
       </button>
-      <p className="text-xs text-gray-500 mt-2.5 flex items-center justify-center gap-1">
-        <span>📊</span> Game data saved for AI training
-      </p>
-      <p className="text-[10px] text-gray-700 mt-1">
+      <button
+        onClick={handleDownload}
+        disabled={downloading}
+        className="w-full mt-2 bg-white/10 hover:bg-white/20 text-gray-300 text-sm font-medium py-2 rounded-xl border border-white/10 flex items-center justify-center gap-1.5 disabled:opacity-50"
+      >
+        <span>⬇️</span> {downloading ? "Downloading…" : "Download game snapshot"}
+      </button>
+      <p className="text-[10px] text-gray-700 mt-2">
         Seat order: {[...players].sort((a, b) => a.seat - b.seat).map(p => `#${p.seat + 1} ${p.username}`).join(" · ")}
       </p>
     </motion.div>

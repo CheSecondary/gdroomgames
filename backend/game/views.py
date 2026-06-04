@@ -1,22 +1,50 @@
 import json
 import random
 import string
+from django.http import HttpResponse
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from .models import Game, Player
 from .serializers import GameSerializer
+from .export import build_game_snapshot
 
 
-def parse_export_jsonl(content: str) -> dict:
+def parse_snapshot(content: str) -> dict:
     """
-    Parse an OpenSpades JSONL export and return resume info.
+    Parse an OpenSpades export file.
+    Supports:
+      - v1 snapshot format: single JSON object with "v":1
+      - legacy JSONL format: looks for "game_summary" event line (backward compat)
+
+    Returns a normalised snapshot dict ready to store in game.resume_snapshot.
     Raises ValueError with a user-facing message on any parse failure.
-    Only needs the game_summary line — everything is in there.
     """
+    content = content.strip()
+    if not content:
+        raise ValueError("File is empty.")
+
+    # ── Try v1 snapshot (single JSON object) ──────────────────────────────────
+    # It might be the whole file or just the first non-empty line
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict) and obj.get("v") == 1:
+                players = obj.get("players", [])
+                if not players:
+                    raise ValueError("No player data found in snapshot.")
+                return obj   # already the full snapshot — pass through as-is
+        except json.JSONDecodeError:
+            pass
+        break   # only try the first non-empty line for v1
+
+    # ── Fall back to legacy JSONL (game_summary event) ────────────────────────
     summary = None
-    for line in content.strip().splitlines():
+    for line in content.splitlines():
         line = line.strip()
         if not line:
             continue
@@ -30,8 +58,8 @@ def parse_export_jsonl(content: str) -> dict:
 
     if not summary:
         raise ValueError(
-            "Could not find game_summary in the export. "
-            "Make sure you uploaded the correct .jsonl file."
+            "Could not parse the export file. "
+            "Make sure you uploaded an OpenSpades .json or .jsonl file."
         )
 
     players = summary.get("players", [])
@@ -41,21 +69,41 @@ def parse_export_jsonl(content: str) -> dict:
     players_sorted = sorted(players, key=lambda p: p["seat"])
     resume_from    = summary.get("total_rounds", 1)
     max_rounds     = summary.get("max_rounds", resume_from)
+    num_players    = len(players_sorted)
 
+    # Estimate lead player for this round: rotates each round starting from 0
+    lead_player_index = (resume_from - summary.get("start_round", 1)) % num_players
+
+    # Convert legacy format → v1 snapshot shape (status = "waiting" → host starts fresh round)
     return {
-        "old_code":      summary.get("game_code", ""),
-        "num_decks":     summary.get("num_decks", 1),
-        "teams_enabled": summary.get("teams_enabled", False),
-        "max_rounds":    max_rounds,
-        "resume_from":   resume_from,
+        "v":                          1,
+        "code":                       summary.get("game_code", ""),
+        "saved_at":                   None,
+        "status":                     "waiting",   # legacy exports = clean resume, deal fresh
+        "num_decks":                  summary.get("num_decks", 1),
+        "teams_enabled":              summary.get("teams_enabled", False),
+        "teams":                      summary.get("teams", []),
+        "start_round":                resume_from,
+        "current_round":              resume_from,
+        "max_rounds":                 max_rounds,
+        "lead_player_index":          lead_player_index,
+        "current_player_index":       lead_player_index,
+        "trump_suit":                 "",
+        "trump_card":                 None,
         "players": [
             {
-                "seat":     p["seat"],
-                "username": p["username"],
-                "score":    p.get("final_score", 0),
+                "seat":        p["seat"],
+                "username":    p["username"],
+                "total_score": p.get("final_score", 0),
+                "hand":        [],
+                "bid":         -1,
+                "tricks_won":  0,
             }
             for p in players_sorted
         ],
+        "current_trick":               [],
+        "trick_lead_suit":             "",
+        "tricks_completed_this_round": 0,
     }
 
 
@@ -160,67 +208,90 @@ class HealthCheckView(APIView):
         return Response({"status": "ok"}, status=status.HTTP_200_OK)
 
 
+class GameSnapshotView(APIView):
+    """
+    GET /api/game/<code>/snapshot/
+    Returns the full game state snapshot as a downloadable .json file.
+    Available to all players (and spectators) — serves as a local backup
+    of the same snapshot sent to Telegram.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request, code):
+        snap = build_game_snapshot(code.upper())
+        if snap is None:
+            return Response({"error": "Game not found."}, status=404)
+
+        content  = json.dumps(snap, ensure_ascii=False, indent=2)
+        filename = f"openspades_{code.upper()}.json"
+        response = HttpResponse(content, content_type="application/json")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+
 class ResumeFromExportView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        host_username = request.data.get("username", "").strip()[:50]
-        content       = request.data.get("content", "")
+        caller  = request.data.get("username", "").strip()[:50]
+        content = request.data.get("content", "")
 
-        if not host_username:
+        if not caller:
             return Response({"error": "Username required."}, status=400)
         if not content:
             return Response({"error": "Export file content required."}, status=400)
 
         try:
-            info = parse_export_jsonl(content)
+            snap = parse_snapshot(content)
         except ValueError as e:
             return Response({"error": str(e)}, status=400)
 
-        players = info["players"]  # [{seat, username, score}]
+        players = snap["players"]   # [{seat, username, total_score, hand, bid, tricks_won}]
 
-        # Try to reuse old room code; fall back to a fresh one if it's still in DB
-        old_code = info["old_code"].upper()
+        # Try to reuse old room code; fall back to a fresh one
+        old_code = snap.get("code", "").upper()
         if old_code and not Game.objects.filter(code=old_code).exists():
             code = old_code
         else:
             code = gen_code()
 
-        # Original host = player at seat 0 (CreateGameView always assigns seat 0 to host).
-        # We deliberately ignore the API caller's username here — whoever runs this tool
-        # is just reconstructing the room, they don't become the host.
-        original_host = players[0]["username"]  # players already sorted by seat
+        # Original host = seat 0 (CreateGameView always puts the host at seat 0)
+        original_host = next((p["username"] for p in players if p["seat"] == 0), players[0]["username"])
 
         game = Game.objects.create(
             code             = code,
             host_username    = original_host,
             status           = Game.STATUS_WAITING,
-            num_decks        = info["num_decks"],
-            teams_enabled    = info["teams_enabled"],
+            num_decks        = snap["num_decks"],
+            teams_enabled    = snap["teams_enabled"],
             expected_players = len(players),
-            start_round      = info["resume_from"],
-            current_round    = info["resume_from"],
-            max_rounds       = info["max_rounds"],
+            # Round metadata from snapshot — used if status is "waiting" (clean resume)
+            start_round      = snap["current_round"],
+            current_round    = snap["current_round"],
+            max_rounds       = snap["max_rounds"],
+            # Store the full snapshot — consumed by handle_start_game to restore exact state
+            resume_snapshot  = snap,
         )
 
-        # Pre-create all player slots with the right seats and carry-over scores.
-        # JoinGameView already returns early if a username already has a row in the game,
-        # so each original player just needs to join with their exact username.
+        # Pre-create all player slots with correct seats and carry-over scores.
+        # Hands/bids/tricks_won will be restored from snapshot when host starts.
         for p in players:
             Player.objects.create(
                 game        = game,
                 username    = p["username"],
                 seat        = p["seat"],
-                total_score = p["score"],
+                total_score = p["total_score"],
             )
 
+        snap_status = snap.get("status", "waiting")
         return Response({
-            "code":             code,
-            "original_code":    old_code,
-            "same_code":        code == old_code,
-            "resume_from_round": info["resume_from"],
-            "max_rounds":       info["max_rounds"],
-            "num_decks":        info["num_decks"],
-            "teams_enabled":    info["teams_enabled"],
-            "players":          players,
+            "code":          code,
+            "original_code": old_code,
+            "same_code":     code == old_code,
+            "snap_status":   snap_status,
+            "current_round": snap["current_round"],
+            "max_rounds":    snap["max_rounds"],
+            "num_decks":     snap["num_decks"],
+            "teams_enabled": snap["teams_enabled"],
+            "players":       players,
         }, status=status.HTTP_201_CREATED)

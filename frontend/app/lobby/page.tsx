@@ -6,6 +6,13 @@ import { api } from "@/lib/api";
 
 type Tab = "create" | "join" | "resume";
 
+const SUIT_ICON:  Record<string, string> = { spades: "♠", hearts: "♥", diamonds: "♦", clubs: "♣" };
+const SUIT_COLOR: Record<string, string> = { spades: "text-white", hearts: "text-red-400", diamonds: "text-red-400", clubs: "text-white" };
+const STATUS_LABEL: Record<string, string> = {
+  bidding: "Mid-bidding", playing: "Mid-trick",
+  prompt: "Between rounds", waiting: "Clean resume", finished: "Game ended",
+};
+
 interface PlayerOption {
   seat: number;
   username: string;
@@ -34,18 +41,29 @@ export default function LobbyPage() {
   const [resumeContent,  setResumeContent]  = useState("");
   // Stage 1: locally parsed preview (no DB yet)
   const [resumePreview,  setResumePreview]  = useState<null | {
-    old_code: string;
+    v: number;
+    code: string;
+    status: string;
     num_decks: number;
     teams_enabled: boolean;
+    teams: number[][];
+    current_round: number;
     max_rounds: number;
-    resume_from: number;
-    players: { seat: number; username: string; score: number }[];
+    lead_player_index: number;
+    current_player_index: number;
+    trump_suit: string;
+    trump_card: { suit: string; rank: string } | null;
+    players: { seat: number; username: string; total_score: number; hand: object[]; bid: number; tricks_won: number }[];
+    current_trick: { seat: number; username: string; card: { suit: string; rank: string } }[];
+    trick_lead_suit: string;
+    tricks_completed_this_round: number;
   }>(null);
   // Stage 2: room actually created in DB
   const [resumeCreated,  setResumeCreated]  = useState<null | {
     code: string;
     original_code: string;
     same_code: boolean;
+    snap_status: string;
   }>(null);
 
   const teamsAllowed = numPlayers >= 4 && numPlayers % 2 === 0;
@@ -117,7 +135,23 @@ export default function LobbyPage() {
   function handleResumePreview() {
     setError("");
     const content = resumeContent.trim();
-    if (!content) { setError("Paste or upload a .jsonl file first."); return; }
+    if (!content) { setError("Paste or upload an export file first."); return; }
+
+    // ── Try v1 snapshot format first ─────────────────────────────────────────
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const obj = JSON.parse(trimmed);
+        if (obj && obj.v === 1 && Array.isArray(obj.players)) {
+          setResumePreview(obj);
+          return;
+        }
+      } catch { /* not JSON */ }
+      break; // only check first non-empty line for v1
+    }
+
+    // ── Fall back to legacy JSONL (game_summary event) ───────────────────────
     for (const line of content.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed) continue;
@@ -126,23 +160,37 @@ export default function LobbyPage() {
         if (ev.event === "game_summary") {
           const players = [...(ev.players || [])].sort((a: any, b: any) => a.seat - b.seat);
           const resumeFrom = ev.total_rounds ?? 1;
+          const maxRounds  = ev.max_rounds   ?? resumeFrom;
+          const numPlayers = players.length;
+          const leadIdx    = (resumeFrom - (ev.start_round ?? 1)) % numPlayers;
           setResumePreview({
-            old_code:      ev.game_code    || "",
-            num_decks:     ev.num_decks    || 1,
+            v: 1,
+            code:          ev.game_code || "",
+            status:        "waiting",
+            num_decks:     ev.num_decks || 1,
             teams_enabled: ev.teams_enabled || false,
-            max_rounds:    ev.max_rounds   || resumeFrom,
-            resume_from:   resumeFrom,
+            teams:         ev.teams || [],
+            current_round: resumeFrom,
+            max_rounds:    maxRounds,
+            lead_player_index:    leadIdx,
+            current_player_index: leadIdx,
+            trump_suit:    "",
+            trump_card:    null,
             players: players.map((p: any) => ({
-              seat:     p.seat,
-              username: p.username,
-              score:    p.final_score ?? 0,
+              seat: p.seat, username: p.username,
+              total_score: p.final_score ?? 0,
+              hand: [], bid: -1, tricks_won: 0,
             })),
+            current_trick: [],
+            trick_lead_suit: "",
+            tricks_completed_this_round: 0,
           });
           return;
         }
       } catch { continue; }
     }
-    setError("Could not find game_summary in the file. Make sure it's the correct .jsonl export.");
+
+    setError("Could not parse the file. Make sure it's an OpenSpades .json or .jsonl export.");
   }
 
   async function handleResumeCreate() {
@@ -150,10 +198,15 @@ export default function LobbyPage() {
     setError(""); setLoading(true);
     try {
       const data = await api.resumeFromExport(username, resumeContent.trim());
-      setResumeCreated({ code: data.code, original_code: data.original_code, same_code: data.same_code });
+      setResumeCreated({ code: data.code, original_code: data.original_code, same_code: data.same_code, snap_status: data.snap_status });
     } catch (e: any) { setError(e.message); }
     finally { setLoading(false); }
   }
+
+  // Derived for resume preview — safe to compute here (null when no preview)
+  const previewNextPlayer = resumePreview
+    ? resumePreview.players.find(p => p.seat === resumePreview.current_player_index) ?? null
+    : null;
 
   function spectatePlayer(seat: number) {
     if (!spectateGame) return;
@@ -393,35 +446,80 @@ export default function LobbyPage() {
               /* ── Stage 1: preview (no DB yet) ──────────────────────────── */
               ) : resumePreview ? (
                 <div className="flex flex-col gap-3">
-                  {/* Game info */}
-                  <div className="bg-black/30 rounded-xl px-3 py-2 text-xs text-gray-400 space-y-1 border border-white/5">
+                  {/* Status banner */}
+                  <div className={`rounded-xl px-3 py-2 text-xs border space-y-1 ${
+                    resumePreview.status === "playing" ? "bg-yellow-400/5 border-yellow-400/20" :
+                    resumePreview.status === "bidding" ? "bg-blue-400/5 border-blue-400/20" :
+                    "bg-white/5 border-white/10"
+                  }`}>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Resume from round</span>
-                      <span className="text-yellow-400 font-bold">{resumePreview.resume_from} / {resumePreview.max_rounds}</span>
+                      <span className="text-gray-600">Saved at</span>
+                      <span className="text-white font-semibold">{STATUS_LABEL[resumePreview.status] ?? resumePreview.status}</span>
                     </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Round</span>
+                      <span className="text-yellow-400 font-bold">{resumePreview.current_round} / {resumePreview.max_rounds}</span>
+                    </div>
+                    {resumePreview.trump_card && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Trump</span>
+                        <span className={`font-bold ${SUIT_COLOR[resumePreview.trump_suit] ?? "text-white"}`}>
+                          {resumePreview.trump_card.rank} {SUIT_ICON[resumePreview.trump_suit] ?? resumePreview.trump_suit}
+                        </span>
+                      </div>
+                    )}
+                    {previewNextPlayer && resumePreview.status !== "waiting" && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">{resumePreview.status === "bidding" ? "Bids next" : "Plays next"}</span>
+                        <span className={`font-semibold ${previewNextPlayer.username === username ? "text-yellow-300" : "text-white"}`}>
+                          {previewNextPlayer.username}{previewNextPlayer.username === username ? " (you)" : ""}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex justify-between">
                       <span className="text-gray-600">Mode</span>
-                      <span className="text-white">{resumePreview.teams_enabled ? `Teams (${resumePreview.players.length / 2}v${resumePreview.players.length / 2})` : "Solo"}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Decks</span>
-                      <span className="text-white">{resumePreview.num_decks}</span>
+                      <span className="text-white">{resumePreview.teams_enabled ? `Teams (${resumePreview.players.length / 2}v${resumePreview.players.length / 2})` : "Solo"} · {resumePreview.num_decks} deck</span>
                     </div>
                   </div>
 
-                  {/* Player list with scores */}
+                  {/* Current trick (if mid-trick) */}
+                  {resumePreview.current_trick.length > 0 && (
+                    <div className="bg-black/30 rounded-xl px-3 py-2 border border-white/5">
+                      <p className="text-gray-600 text-[10px] uppercase tracking-widest font-semibold mb-1.5">
+                        Trick in progress ({resumePreview.current_trick.length}/{resumePreview.players.length} cards played)
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {resumePreview.current_trick.map((tc: any) => (
+                          <span key={tc.play_order} className={`text-sm font-bold px-2 py-0.5 rounded-md bg-white/5 border border-white/10 ${SUIT_COLOR[tc.card.suit] ?? "text-white"}`}>
+                            {tc.card.rank}{SUIT_ICON[tc.card.suit] ?? tc.card.suit}
+                            <span className="text-gray-600 font-normal text-[10px] ml-1">{tc.username}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Player list with scores + hand sizes */}
                   <div className="space-y-1">
-                    <p className="text-gray-600 text-[10px] uppercase tracking-widest font-semibold">Players &amp; scores going into round {resumePreview.resume_from}</p>
+                    <p className="text-gray-600 text-[10px] uppercase tracking-widest font-semibold">
+                      Players · scores · {resumePreview.status !== "waiting" ? "cards in hand" : "going into round " + resumePreview.current_round}
+                    </p>
                     {resumePreview.players.map((p) => {
-                      const isMe = p.username === username;
+                      const isMe   = p.username === username;
+                      const isNext = p.seat === resumePreview.current_player_index && resumePreview.status !== "waiting";
                       return (
-                        <div key={p.seat} className={`flex items-center gap-2 rounded-lg px-3 py-1.5 border ${isMe ? "bg-yellow-400/10 border-yellow-400/30" : "bg-black/30 border-white/5"}`}>
+                        <div key={p.seat} className={`flex items-center gap-2 rounded-lg px-3 py-1.5 border ${isMe ? "bg-yellow-400/10 border-yellow-400/30" : isNext ? "bg-emerald-400/5 border-emerald-400/20" : "bg-black/30 border-white/5"}`}>
                           <span className="text-gray-600 font-mono text-[10px]">#{p.seat + 1}</span>
                           <span className={`font-semibold flex-1 text-sm ${isMe ? "text-yellow-300" : "text-white"}`}>
-                            {p.username}{isMe && <span className="text-gray-500 font-normal text-[10px] ml-1">(you)</span>}
+                            {p.username}
+                            {isMe && <span className="text-gray-500 font-normal text-[10px] ml-1">(you)</span>}
+                            {isNext && !isMe && <span className="text-emerald-400 font-normal text-[10px] ml-1">← next</span>}
                           </span>
-                          <span className={`font-bold text-xs ${p.score > 0 ? "text-emerald-400" : p.score < 0 ? "text-red-400" : "text-gray-600"}`}>
-                            {p.score > 0 ? `+${p.score}` : p.score}
+                          {p.hand.length > 0 && (
+                            <span className="text-gray-500 text-[10px]">{p.hand.length}🃏</span>
+                          )}
+                          <span className={`font-bold text-xs ${p.total_score > 0 ? "text-emerald-400" : p.total_score < 0 ? "text-red-400" : "text-gray-600"}`}>
+                            {p.total_score > 0 ? `+${p.total_score}` : p.total_score}
                           </span>
                         </div>
                       );
@@ -453,8 +551,6 @@ export default function LobbyPage() {
                     ← Back
                   </button>
                 </div>
-
-              /* ── Stage 0: input ──────────────────────────────────────────── */
               ) : (
                 <>
                   <p className="text-gray-500 text-xs leading-relaxed">
