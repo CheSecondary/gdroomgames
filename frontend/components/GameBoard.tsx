@@ -10,6 +10,7 @@ import type { GameState, Card as CardType, RoundScore } from "@/lib/types";
 import { TEAM_COLORS } from "@/lib/types";
 import type { ChatMessage, Reaction, PeekStatus, TakeoverStatus } from "@/lib/useGameSocket";
 import { REACTION_EMOJIS } from "@/lib/useGameSocket";
+import { sfxCardPlay, sfxYourTurn, sfxTrickWon, sfxRoundEnd, sfxChatMessage } from "@/lib/sounds";
 
 interface Props {
   state: GameState;
@@ -17,6 +18,7 @@ interface Props {
   gameCode: string;
   gameError: string | null;
   roundSummary: { round: number; scores: RoundScore[] } | null;
+  roundHistory: { round: number; scores: RoundScore[] }[];
   trickWinner: { winner: string; seat: number } | null;
   chatMessages: ChatMessage[];
   chatToasts: ChatMessage[];
@@ -66,6 +68,7 @@ export default function GameBoard({
   gameCode,
   gameError,
   roundSummary,
+  roundHistory,
   trickWinner,
   chatMessages,
   chatToasts,
@@ -117,6 +120,62 @@ export default function GameBoard({
       return () => clearTimeout(t);
     }
   }, [handedOff?.from, handedOff?.to]);
+
+  // Request notification permission once on mount
+  useEffect(() => {
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  // Haptic + tab notification when it becomes MY turn
+  const myTurnRef = useRef(false);
+  useEffect(() => {
+    if (!state) return;
+    const isMyTurn = !isSpectator &&
+      state.players[state.current_player_index]?.username === username &&
+      (state.status === "bidding" || state.status === "playing");
+
+    if (isMyTurn && !myTurnRef.current) {
+      // Haptic
+      if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
+      // Sound
+      sfxYourTurn();
+      // Tab notification only if tab not focused
+      if (document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted") {
+        new Notification("OpenSpades — your turn! 🃏", {
+          body: state.status === "bidding" ? "Place your bid" : "Play a card",
+          icon: "/favicon.ico",
+          tag: "your-turn",
+        });
+      }
+    }
+    myTurnRef.current = isMyTurn;
+  }, [state?.current_player_index, state?.status]);
+
+  // Sound: card played (trick length increases)
+  const trickLenRef = useRef(0);
+  useEffect(() => {
+    if (!state) return;
+    const len = state.current_trick.length;
+    if (len > trickLenRef.current) sfxCardPlay();
+    trickLenRef.current = len;
+  }, [state?.current_trick.length]);
+
+  // Sound: trick won
+  useEffect(() => {
+    if (trickWinner) sfxTrickWon();
+  }, [trickWinner]);
+
+  // Sound: round ended
+  useEffect(() => {
+    if (roundSummary) sfxRoundEnd();
+  }, [roundSummary]);
+
+  // Sound: incoming chat message (only when chat is closed)
+  useEffect(() => {
+    if (chatToasts.length > 0 && !showChat) sfxChatMessage();
+  }, [chatToasts.length]);
 
   const toggleChat = () => {
     setShowChat(!showChat);
@@ -832,6 +891,46 @@ export default function GameBoard({
                 teamsEnabled={state.teams_enabled}
                 teams={state.teams}
               />
+
+              {/* Round history — horizontal scrollable table */}
+              {roundHistory.length > 0 && (() => {
+                // collect unique player names in seat order from latest round
+                const playerNames = roundHistory[roundHistory.length - 1].scores.map((s) => s.username);
+                return (
+                  <div className="mt-4">
+                    <p className="text-gray-600 text-[10px] uppercase tracking-widest mb-2">Round History</p>
+                    <div className="overflow-x-auto rounded-xl border border-white/5">
+                      <table className="text-xs w-full min-w-max">
+                        <thead>
+                          <tr className="bg-black/40">
+                            <th className="text-left px-3 py-1.5 text-gray-600 font-normal sticky left-0 bg-black/40">Player</th>
+                            {roundHistory.map((r) => (
+                              <th key={r.round} className="px-2.5 py-1.5 text-gray-600 font-normal text-center">R{r.round}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {playerNames.map((name) => (
+                            <tr key={name} className="border-t border-white/5">
+                              <td className={`px-3 py-1.5 sticky left-0 bg-gray-900 font-medium ${name === username ? "text-yellow-300" : "text-gray-300"}`}>
+                                {name}
+                              </td>
+                              {roundHistory.map((r) => {
+                                const s = r.scores.find((x) => x.username === name);
+                                return (
+                                  <td key={r.round} className={`px-2.5 py-1.5 text-center font-semibold ${!s ? "text-gray-700" : s.delta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                                    {s ? (s.delta > 0 ? `+${s.delta}` : s.delta) : "—"}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
             </motion.div>
           </motion.div>
         )}

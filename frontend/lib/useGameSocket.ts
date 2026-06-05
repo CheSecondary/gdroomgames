@@ -36,6 +36,7 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [roundSummary, setRoundSummary] = useState<{ round: number; scores: RoundScore[] } | null>(null);
+  const [roundHistory, setRoundHistory] = useState<{ round: number; scores: RoundScore[] }[]>([]);
   const [trickWinner, setTrickWinner] = useState<{ winner: string; seat: number } | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatToasts, setChatToasts]     = useState<ChatMessage[]>([]);
@@ -77,7 +78,13 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
           setError(msg.message);
           setTimeout(() => setError(null), 3000);
         } else if (msg.type === "round_ended") {
-          setRoundSummary({ round: msg.round, scores: msg.scores });
+          const entry = { round: msg.round, scores: msg.scores };
+          setRoundSummary(entry);
+          setRoundHistory((prev) => {
+            // replace if same round already stored (e.g. reconnect), else append
+            const exists = prev.find((r) => r.round === msg.round);
+            return exists ? prev.map((r) => r.round === msg.round ? entry : r) : [...prev, entry];
+          });
         } else if (msg.type === "trick_winner") {
           setTrickWinner({ winner: msg.winner, seat: msg.seat });
         } else if (msg.type === "chat_message") {
@@ -211,6 +218,7 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
     error,
     connected,
     roundSummary,
+    roundHistory,
     trickWinner,
     chatMessages,
     chatToasts,

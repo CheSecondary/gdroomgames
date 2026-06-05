@@ -35,7 +35,7 @@ export default function GamePage() {
   }, [code, router, isOutsider]);
 
   const {
-    state, error, connected, roundSummary, trickWinner, clearSummary,
+    state, error, connected, roundSummary, roundHistory, trickWinner, clearSummary,
     startGame, cancelGame, kickPlayer, placeBid, playCard, endGame, chatMessages, sendChat,
     chatToasts, reactions, rematchInvite, dismissRematch,
     sendReaction, rematch,
@@ -103,6 +103,7 @@ export default function GamePage() {
       gameCode={code}
       gameError={error}
       roundSummary={roundSummary}
+      roundHistory={roundHistory}
       trickWinner={trickWinner}
       chatMessages={chatMessages}
       chatToasts={chatToasts}
