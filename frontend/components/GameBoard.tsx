@@ -265,10 +265,10 @@ export default function GameBoard({
     >
       {/* ── Compact header ───────────────────────────────────────────────────── */}
       <header className="flex items-center justify-between px-3 py-1.5 bg-black/55 border-b border-white/5 shrink-0 z-20">
-        {/* Left: logo · code · round · trump */}
+        {/* Left: logo · code (desktop) · round · trump */}
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-yellow-400 font-extrabold text-sm shrink-0">♠</span>
-          <span className="bg-black/50 text-gray-300 text-xs px-1.5 py-0.5 rounded font-mono border border-white/10 shrink-0">
+          <span className="hidden md:inline bg-black/50 text-gray-300 text-xs px-1.5 py-0.5 rounded font-mono border border-white/10 shrink-0">
             {gameCode}
           </span>
           {state.status !== "finished" && (
@@ -392,6 +392,13 @@ export default function GameBoard({
             transition={{ duration: 0.16 }}
             className="md:hidden overflow-hidden bg-black/75 border-b border-white/5 shrink-0 z-20"
           >
+            {/* Room code row */}
+            <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5 border-b border-white/5">
+              <span className="text-gray-500 text-[10px] uppercase tracking-widest">Room</span>
+              <span className="bg-black/60 text-yellow-300 text-sm px-2.5 py-1 rounded font-mono border border-yellow-400/20 tracking-widest font-bold select-all">
+                {gameCode}
+              </span>
+            </div>
             <div className="flex items-center gap-2 px-3 py-2 flex-wrap">
               <button
                 onClick={() => setShowVoice(v => !v)}
