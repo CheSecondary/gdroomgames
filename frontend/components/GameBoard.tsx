@@ -112,6 +112,19 @@ export default function GameBoard({
   const [lastReadCount, setLastReadCount] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  const [sfxOn, setSfxOn] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("os_sfx") !== "off";
+  });
+  const toggleSfx = () => setSfxOn((v) => {
+    const next = !v;
+    localStorage.setItem("os_sfx", next ? "on" : "off");
+    return next;
+  });
+
+  const [lastTrick, setLastTrick] = useState<typeof state.current_trick>([]);
+  const [showLastTrick, setShowLastTrick] = useState(false);
+
   // Show brief ownership toast to ALL players when any transfer happens
   useEffect(() => {
     if (handedOff) {
@@ -140,7 +153,7 @@ export default function GameBoard({
       // Haptic
       if (navigator.vibrate) navigator.vibrate([60, 40, 60]);
       // Sound
-      sfxYourTurn();
+      if (sfxOn) sfxYourTurn();
       // Tab notification only if tab not focused
       if (document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted") {
         new Notification("OpenSpades — your turn! 🃏", {
@@ -158,23 +171,27 @@ export default function GameBoard({
   useEffect(() => {
     if (!state) return;
     const len = state.current_trick.length;
-    if (len > trickLenRef.current) sfxCardPlay();
+    if (len > trickLenRef.current && sfxOn) sfxCardPlay();
     trickLenRef.current = len;
   }, [state?.current_trick.length]);
 
-  // Sound: trick won
+  // Sound + capture last trick when trick is won
   useEffect(() => {
-    if (trickWinner) sfxTrickWon();
+    if (trickWinner) {
+      if (sfxOn) sfxTrickWon();
+      // Capture the current trick cards before state clears them
+      if (state?.current_trick.length) setLastTrick(state.current_trick);
+    }
   }, [trickWinner]);
 
   // Sound: round ended
   useEffect(() => {
-    if (roundSummary) sfxRoundEnd();
+    if (roundSummary && sfxOn) sfxRoundEnd();
   }, [roundSummary]);
 
   // Sound: incoming chat message (only when chat is closed)
   useEffect(() => {
-    if (chatToasts.length > 0 && !showChat) sfxChatMessage();
+    if (chatToasts.length > 0 && !showChat && sfxOn) sfxChatMessage();
   }, [chatToasts.length]);
 
   const toggleChat = () => {
@@ -299,6 +316,19 @@ export default function GameBoard({
 
         {/* Right: chat (always) + desktop inline + hamburger (mobile) */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {/* SFX toggle */}
+          <button
+            onClick={toggleSfx}
+            title={sfxOn ? "Mute sound effects" : "Unmute sound effects"}
+            className={`px-1.5 py-1 rounded-lg border text-[10px] font-bold tracking-wide transition-all ${
+              sfxOn
+                ? "bg-white/5 border-white/10 text-gray-400 hover:text-yellow-400"
+                : "bg-white/5 border-white/10 text-gray-700 line-through"
+            }`}
+          >
+            SFX
+          </button>
+
           {/* Chat — always visible, most used */}
           <button
             onClick={toggleChat}
@@ -785,6 +815,15 @@ export default function GameBoard({
                 trumpSuit={state.trump_suit}
                 playerCount={state.players.length}
               />
+              {/* Last trick button — only when trick area is empty and we have history */}
+              {state.current_trick.length === 0 && lastTrick.length > 0 && !trickWinner && (
+                <button
+                  onClick={() => setShowLastTrick(true)}
+                  className="text-[10px] text-gray-600 hover:text-gray-400 underline underline-offset-2 transition-colors"
+                >
+                  👁 last trick
+                </button>
+              )}
 
               {/* Status / action area */}
               <div className="w-full max-w-xs flex flex-col items-center gap-1.5 min-h-[40px]">
@@ -1043,6 +1082,40 @@ export default function GameBoard({
                 Send
               </button>
             </form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Last trick overlay ────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showLastTrick && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowLastTrick(false)}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.88 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.88 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-gray-900 border border-white/10 rounded-2xl p-5 max-w-xs w-full shadow-2xl"
+            >
+              <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-3">Last completed trick</p>
+              <TrickGrid
+                cards={lastTrick}
+                trumpSuit={state?.trump_suit ?? ""}
+                playerCount={state?.players.length ?? lastTrick.length}
+              />
+              <button
+                onClick={() => setShowLastTrick(false)}
+                className="mt-4 w-full text-gray-600 text-xs hover:text-gray-400"
+              >
+                Close
+              </button>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
