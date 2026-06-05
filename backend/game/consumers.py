@@ -71,6 +71,8 @@ class GameConsumer(AsyncWebsocketConsumer):
             "request_takeover": self.handle_request_takeover,
             "accept_takeover":  self.handle_accept_takeover,
             "decline_takeover": self.handle_decline_takeover,
+            "send_reaction":    self.handle_send_reaction,
+            "rematch":          self.handle_rematch,
         }
         handler = handlers.get(data.get("action"))
         if handler:
@@ -209,6 +211,64 @@ class GameConsumer(AsyncWebsocketConsumer):
                 "is_spectator": self.is_spec,
             }
         )
+
+    async def handle_send_reaction(self, data):
+        ALLOWED = {"🔥", "😂", "💀", "👏", "😤", "🎉"}
+        emoji = data.get("emoji", "")
+        if emoji not in ALLOWED:
+            return
+        seat = await self.db_get_my_seat()
+        await self.channel_layer.group_send(
+            self.room_group,
+            {
+                "type": "reaction_msg",
+                "username": self.username,
+                "seat":     seat,
+                "emoji":    emoji,
+            }
+        )
+
+    async def handle_rematch(self, data):
+        game = await self.get_game()
+        if game.host_username != self.username:
+            return
+        if game.status != Game.STATUS_FINISHED:
+            return
+        new_code = await self.db_create_rematch_game(game)
+        await self.channel_layer.group_send(
+            self.room_group,
+            {
+                "type":     "rematch_invite_msg",
+                "new_code": new_code,
+                "host":     self.username,
+            }
+        )
+
+    @database_sync_to_async
+    def db_create_rematch_game(self, game):
+        from .views import gen_code
+        players  = list(game.players.order_by("seat"))
+        new_code = gen_code()
+        new_game = Game.objects.create(
+            code             = new_code,
+            host_username    = game.host_username,
+            num_decks        = game.num_decks,
+            expected_players = game.expected_players,
+            teams_enabled    = game.teams_enabled,
+            start_round      = game.start_round,
+            max_rounds       = game.max_rounds,
+            teams            = game.teams,   # same team seat assignments
+        )
+        for p in players:
+            Player.objects.create(game=new_game, username=p.username, seat=p.seat)
+        return new_code
+
+    @database_sync_to_async
+    def db_get_my_seat(self):
+        try:
+            return Player.objects.get(game__code=self.game_code, username=self.username).seat
+        except Exception:
+            return -1
 
     async def handle_request_peek(self, data):
         if not self.is_spec:
@@ -599,6 +659,21 @@ class GameConsumer(AsyncWebsocketConsumer):
             "username": event["username"],
             "message": event["message"],
             "is_spectator": event.get("is_spectator", False),
+        }))
+
+    async def reaction_msg(self, event):
+        await self.send(text_data=json.dumps({
+            "type":     "reaction",
+            "username": event["username"],
+            "seat":     event["seat"],
+            "emoji":    event["emoji"],
+        }))
+
+    async def rematch_invite_msg(self, event):
+        await self.send(text_data=json.dumps({
+            "type":     "rematch_invite",
+            "new_code": event["new_code"],
+            "host":     event["host"],
         }))
 
     async def peek_requested_msg(self, event):

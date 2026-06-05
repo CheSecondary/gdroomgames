@@ -8,7 +8,8 @@ import RoundSummary from "./RoundSummary";
 import VoiceChat from "./VoiceChat";
 import type { GameState, Card as CardType, RoundScore } from "@/lib/types";
 import { TEAM_COLORS } from "@/lib/types";
-import type { ChatMessage, PeekStatus, TakeoverStatus } from "@/lib/useGameSocket";
+import type { ChatMessage, Reaction, PeekStatus, TakeoverStatus } from "@/lib/useGameSocket";
+import { REACTION_EMOJIS } from "@/lib/useGameSocket";
 
 interface Props {
   state: GameState;
@@ -18,7 +19,13 @@ interface Props {
   roundSummary: { round: number; scores: RoundScore[] } | null;
   trickWinner: { winner: string; seat: number } | null;
   chatMessages: ChatMessage[];
+  chatToasts: ChatMessage[];
+  reactions: Reaction[];
+  rematchInvite: { code: string; host: string } | null;
   sendChat: (message: string) => void;
+  sendReaction: (emoji: string) => void;
+  onRematch: () => void;
+  onDismissRematch: () => void;
   onClearSummary: () => void;
   onBid: (bid: number) => void;
   onPlayCard: (card: CardType) => void;
@@ -61,7 +68,13 @@ export default function GameBoard({
   roundSummary,
   trickWinner,
   chatMessages,
+  chatToasts,
+  reactions,
+  rematchInvite,
   sendChat,
+  sendReaction,
+  onRematch,
+  onDismissRematch,
   onClearSummary,
   onBid,
   onPlayCard,
@@ -616,7 +629,9 @@ export default function GameBoard({
             players={state.players}
             teamsEnabled={state.teams_enabled}
             teams={state.teams}
+            isHost={state.host_username === username}
             onNewGame={() => { window.location.href = "/lobby"; }}
+            onRematch={onRematch}
           />
         </div>
       ) : (
@@ -637,6 +652,20 @@ export default function GameBoard({
 
             {/* Your hand — LEFT in landscape, BOTTOM in portrait */}
             <div className="landscape:w-[45%] portrait:order-2 portrait:shrink-0 portrait:h-[44%] flex flex-col min-h-0 bg-black/20 rounded-xl border border-white/5 p-2">
+              {/* Emoji reaction bar */}
+              {!isSpectator && (
+                <div className="flex gap-1.5 mb-1.5 shrink-0 justify-center">
+                  {REACTION_EMOJIS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      onClick={() => sendReaction(emoji)}
+                      className="text-base leading-none w-7 h-7 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/15 active:scale-90 transition-transform"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
               {/* Hand header */}
               <div className="flex items-center justify-between mb-1.5 shrink-0">
                 <span className="text-gray-400 text-[11px] font-semibold">
@@ -918,6 +947,75 @@ export default function GameBoard({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── Floating emoji reactions ───────────────────────────────────────────── */}
+      <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
+        <AnimatePresence>
+          {reactions.map((r) => (
+            <motion.div
+              key={r.id}
+              initial={{ opacity: 1, y: 0, scale: 0.8 }}
+              animate={{ opacity: 0, y: -120, scale: 1.4 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 2.2, ease: "easeOut" }}
+              className="absolute bottom-32 left-1/2 -translate-x-1/2 flex flex-col items-center"
+            >
+              <span className="text-4xl drop-shadow-lg">{r.emoji}</span>
+              <span className="text-[10px] text-white/70 mt-0.5">{r.username}</span>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      {/* ── Chat toasts ────────────────────────────────────────────────────────── */}
+      <div className="fixed top-14 right-3 z-50 flex flex-col gap-1.5 items-end">
+        <AnimatePresence>
+          {chatToasts.map((t) => (
+            <motion.div
+              key={t.id}
+              initial={{ opacity: 0, x: 40 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 40 }}
+              onClick={toggleChat}
+              className="cursor-pointer bg-black/80 border border-white/10 rounded-xl px-3 py-1.5 max-w-[200px] backdrop-blur-sm hover:border-white/30"
+            >
+              <span className="text-yellow-300 text-[11px] font-semibold">{t.username}: </span>
+              <span className="text-white text-[11px] break-words">{t.message.length > 40 ? t.message.slice(0, 40) + "…" : t.message}</span>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      {/* ── Rematch invite popup (non-host players) ───────────────────────────── */}
+      <AnimatePresence>
+        {rematchInvite && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          >
+            <div className="bg-gray-900 border border-yellow-500/40 rounded-2xl px-6 py-5 text-center max-w-xs w-full shadow-2xl">
+              <p className="text-2xl mb-2">🔄</p>
+              <p className="text-white font-bold text-lg mb-1">Rematch!</p>
+              <p className="text-gray-400 text-sm mb-4">{rematchInvite.host} started a new room</p>
+              <button
+                onClick={() => { window.location.href = `/game/${rematchInvite.code}`; }}
+                className="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2.5 rounded-xl mb-2"
+              >
+                Join →
+              </button>
+              <button
+                onClick={onDismissRematch}
+                className="w-full text-gray-500 text-sm py-1 hover:text-gray-300"
+              >
+                Dismiss
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }
@@ -1095,12 +1193,16 @@ function GameOverBanner({
   players,
   teamsEnabled,
   teams,
+  isHost,
   onNewGame,
+  onRematch,
 }: {
   players: GameState["players"];
   teamsEnabled: boolean;
   teams: number[][];
+  isHost: boolean;
   onNewGame: () => void;
+  onRematch: () => void;
 }) {
   if (teamsEnabled && teams.length > 0) {
     const teamResults = teams
@@ -1139,6 +1241,11 @@ function GameOverBanner({
             );
           })}
         </div>
+        {isHost && (
+          <button onClick={onRematch} className="w-full bg-emerald-500 hover:bg-emerald-400 text-white font-bold py-2.5 rounded-xl mb-2">
+            🔄 Rematch (same config)
+          </button>
+        )}
         <button onClick={onNewGame} className="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2.5 rounded-xl">
           New Game →
         </button>
@@ -1170,6 +1277,11 @@ function GameOverBanner({
           </div>
         ))}
       </div>
+      {isHost && (
+        <button onClick={onRematch} className="w-full bg-emerald-500 hover:bg-emerald-400 text-white font-bold py-2.5 rounded-xl mb-2">
+          🔄 Rematch (same config)
+        </button>
+      )}
       <button onClick={onNewGame} className="w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2.5 rounded-xl">
         New Game →
       </button>

@@ -15,6 +15,15 @@ export interface ChatMessage {
 export type PeekStatus     = "idle" | "pending" | "accepted" | "declined";
 export type TakeoverStatus = "idle" | "pending" | "declined";
 
+export interface Reaction {
+  id: string;
+  username: string;
+  seat: number;
+  emoji: string;
+}
+
+export const REACTION_EMOJIS = ["🔥", "😂", "💀", "👏", "😤", "🎉"] as const;
+
 export interface GameStartOverrides {
   seatOrder?: string[];
   leadPlayerIndex?: number;
@@ -29,6 +38,9 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
   const [roundSummary, setRoundSummary] = useState<{ round: number; scores: RoundScore[] } | null>(null);
   const [trickWinner, setTrickWinner] = useState<{ winner: string; seat: number } | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatToasts, setChatToasts]     = useState<ChatMessage[]>([]);
+  const [reactions, setReactions]       = useState<Reaction[]>([]);
+  const [rematchInvite, setRematchInvite] = useState<{ code: string; host: string } | null>(null);
   const [peekStatus, setPeekStatus] = useState<PeekStatus>("idle");
   const [peekRequest, setPeekRequest] = useState<{ spectator: string; targetSeat: number } | null>(null);
   const [takeoverStatus, setTakeoverStatus] = useState<TakeoverStatus>("idle");
@@ -69,16 +81,32 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
         } else if (msg.type === "trick_winner") {
           setTrickWinner({ winner: msg.winner, seat: msg.seat });
         } else if (msg.type === "chat_message") {
-          setChatMessages((prev) => [
-            ...prev,
-            {
-              id: Math.random().toString(36).substring(2, 9),
-              username: msg.username,
-              message: msg.message,
-              timestamp: new Date(),
-              isSpectator: msg.is_spectator ?? false,
-            },
-          ]);
+          const entry: ChatMessage = {
+            id: Math.random().toString(36).substring(2, 9),
+            username: msg.username,
+            message: msg.message,
+            timestamp: new Date(),
+            isSpectator: msg.is_spectator ?? false,
+          };
+          setChatMessages((prev) => [...prev, entry]);
+          // Show toast popup — auto-removed after 4s
+          setChatToasts((prev) => [...prev.slice(-2), entry]); // keep max 3
+          setTimeout(() => {
+            setChatToasts((prev) => prev.filter((t) => t.id !== entry.id));
+          }, 4000);
+        } else if (msg.type === "reaction") {
+          const r: Reaction = {
+            id: Math.random().toString(36).substring(2, 9),
+            username: msg.username,
+            seat:     msg.seat,
+            emoji:    msg.emoji,
+          };
+          setReactions((prev) => [...prev, r]);
+          setTimeout(() => {
+            setReactions((prev) => prev.filter((x) => x.id !== r.id));
+          }, 2500);
+        } else if (msg.type === "rematch_invite") {
+          setRematchInvite({ code: msg.new_code, host: msg.host });
         } else if (msg.type === "peek_requested") {
           setPeekRequest({ spectator: msg.spectator, targetSeat: msg.target_seat });
         } else if (msg.type === "peek_response") {
@@ -147,7 +175,10 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
   const playCard     = useCallback((card: Card) => send({ action: "play_card", card }), [send]);
   const endGame      = useCallback(() => send({ action: "end_game" }), [send]);
   const clearSummary = useCallback(() => setRoundSummary(null), []);
-  const sendChat     = useCallback((message: string) => send({ action: "send_chat", message }), [send]);
+  const sendChat      = useCallback((message: string) => send({ action: "send_chat", message }), [send]);
+  const sendReaction  = useCallback((emoji: string)  => send({ action: "send_reaction", emoji }), [send]);
+  const rematch       = useCallback(() => send({ action: "rematch" }), [send]);
+  const dismissRematch = useCallback(() => setRematchInvite(null), []);
   const extendGame   = useCallback(() => send({ action: "extend_game" }), [send]);
   const finishGame   = useCallback(() => send({ action: "finish_game" }), [send]);
   const requestPeek     = useCallback((targetSeat: number) => {
@@ -182,6 +213,9 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
     roundSummary,
     trickWinner,
     chatMessages,
+    chatToasts,
+    reactions,
+    rematchInvite,
     peekStatus,
     peekRequest,
     takeoverStatus,
@@ -195,6 +229,9 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
     playCard,
     endGame,
     sendChat,
+    sendReaction,
+    rematch,
+    dismissRematch,
     extendGame,
     finishGame,
     requestPeek,
