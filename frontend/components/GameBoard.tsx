@@ -1703,10 +1703,12 @@ function BidAccuracyBadge({ usernames, roundHistory }: {
 }) {
   let won = 0, placed = 0;
   for (const r of roundHistory) {
+    // Bid is shared for teams — take it once from the first member found
+    let bidCounted = false;
     for (const name of usernames) {
       const s = r.scores.find(s => s.username === name);
       if (s && s.bid >= 0) {
-        placed += s.bid;
+        if (!bidCounted) { placed += s.bid; bidCounted = true; }
         won += s.tricks_won;
       }
     }
