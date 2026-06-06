@@ -8,8 +8,7 @@ import RoundSummary from "./RoundSummary";
 import VoiceChat, { type VoiceChatHandle } from "./VoiceChat";
 import type { GameState, Card as CardType, RoundScore } from "@/lib/types";
 import { TEAM_COLORS } from "@/lib/types";
-import type { ChatMessage, Reaction, PeekStatus, TakeoverStatus } from "@/lib/useGameSocket";
-import { REACTION_EMOJIS } from "@/lib/useGameSocket";
+import type { ChatMessage, PeekStatus, TakeoverStatus } from "@/lib/useGameSocket";
 import { sfxCardPlay, sfxYourTurn, sfxTrickWon, sfxRoundEnd, sfxChatMessage, sfxMention } from "@/lib/sounds";
 
 interface Props {
@@ -22,11 +21,9 @@ interface Props {
   trickWinner: { winner: string; seat: number } | null;
   chatMessages: ChatMessage[];
   chatToasts: ChatMessage[];
-  reactions: Reaction[];
   mention: { from: string; message: string } | null;
   rematchInvite: { code: string; host: string } | null;
   sendChat: (message: string) => void;
-  sendReaction: (emoji: string) => void;
   onRematch: () => void;
   onDismissRematch: () => void;
   onClearSummary: () => void;
@@ -55,92 +52,6 @@ interface Props {
 }
 
 
-/** Per-emoji Framer Motion animation props — each emoji has its own personality. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getEmojiAnim(emoji: string, sx: number, seed: number): Record<string, any> {
-  const base = { exit: { opacity: 0 } };
-  switch (emoji) {
-    case "🔥": // fire: wobble side to side while rising
-      return { ...base,
-        initial: { opacity: 1, y: 0, x: sx, scale: 0.7, rotate: 0 },
-        animate: { opacity: [1,1,1,0], y: [0,-40,-100,-160], x: [sx, sx+14, sx-10, sx+6, sx+driftX(seed)], scale: [0.7,1.1,1.3,1.1], rotate: [0,8,-8,4,-4,0] },
-        transition: { duration: 2.2, ease: "easeOut" },
-      };
-    case "😂": // laughing: bouncy scale while floating
-      return { ...base,
-        initial: { opacity: 1, y: 0, x: sx, scale: 0.5 },
-        animate: { opacity: [1,1,1,0], y: [0,-30,-90,-160], scale: [0.5,1.4,1.0,1.5,1.2,0.9] },
-        transition: { duration: 2.0, ease: "easeOut" },
-      };
-    case "💀": // skull: full spin while rising
-      return { ...base,
-        initial: { opacity: 1, y: 0, x: sx, scale: 0.8, rotate: 0 },
-        animate: { opacity: [1,1,1,0], y: [0,-60,-160], scale: [0.8,1.4,1.2], rotate: [0, 180, 360] },
-        transition: { duration: 2.4, ease: "linear" },
-      };
-    case "👏": // clap: pulse in/out like clapping, drifts up
-      return { ...base,
-        initial: { opacity: 1, y: 0, x: sx, scale: 0.8 },
-        animate: { opacity: [1,1,1,0], y: [0,-50,-120,-160], scale: [0.8,1.3,0.9,1.3,0.9,1.4,1.0] },
-        transition: { duration: 2.1, ease: "easeOut" },
-      };
-    case "😤": // angry: rapid horizontal shake, then launch
-      return { ...base,
-        initial: { opacity: 1, y: 0, x: sx, scale: 1 },
-        animate: { opacity: [1,1,1,1,0], y: [0,-10,-10,-90,-160], x: [sx,sx+12,sx-12,sx+8,sx-8,sx+4,sx+driftX(seed)], scale: [1,1.1,1.1,1.3,1.0] },
-        transition: { duration: 2.0, ease: "easeOut" },
-      };
-    case "🎉": // party: zigzag left-right while soaring
-      return { ...base,
-        initial: { opacity: 1, y: 0, x: sx, scale: 0.6, rotate: -20 },
-        animate: { opacity: [1,1,1,0], y: [0,-40,-100,-160], x: [sx, sx+30, sx-20, sx+40, sx+driftX(seed)], scale: [0.6,1.2,1.4,1.5], rotate: [-20,15,-10,20,0] },
-        transition: { duration: 2.5, ease: "easeOut" },
-      };
-    case "🫡": // salute: slide straight up, slight tilt
-      return { ...base,
-        initial: { opacity: 1, y: 0, x: sx, scale: 0.9, rotate: -5 },
-        animate: { opacity: [1,1,1,0], y: [0,-60,-130,-180], scale: [0.9,1.2,1.3,1.1], rotate: [-5,0,5,0] },
-        transition: { duration: 2.0, ease: "easeOut" },
-      };
-    case "💯": // 100: zoom up super fast, overshoot
-      return { ...base,
-        initial: { opacity: 1, y: 0, x: sx, scale: 0.4 },
-        animate: { opacity: [1,1,1,0], y: [0,-30,-140,-200], scale: [0.4,2.0,1.5,1.0] },
-        transition: { duration: 1.6, ease: [0.2,1.4,0.5,1] },
-      };
-    case "🤡": // clown: wobble rotate + float
-      return { ...base,
-        initial: { opacity: 1, y: 0, x: sx, scale: 0.7, rotate: 0 },
-        animate: { opacity: [1,1,1,0], y: [0,-50,-130,-160], x: [sx,sx+20,sx-15,sx+10,sx+driftX(seed)], scale: [0.7,1.2,1.4,1.2], rotate: [0,-20,20,-15,10,0] },
-        transition: { duration: 2.3, ease: "easeOut" },
-      };
-    case "😱": // scream: explode outward, fade
-      return { ...base,
-        initial: { opacity: 1, y: 0, x: sx, scale: 0.5 },
-        animate: { opacity: [1,1,0.6,0], y: [0,-20,-80,-120], scale: [0.5,2.2,2.5,1.8] },
-        transition: { duration: 1.8, ease: "easeOut" },
-      };
-    case "🤌": // chef's kiss: graceful curve up and out
-      return { ...base,
-        initial: { opacity: 1, y: 0, x: sx, scale: 0.8, rotate: 0 },
-        animate: { opacity: [1,1,1,0], y: [0,-50,-120,-180], x: [sx, sx+40, sx+60, sx+50], scale: [0.8,1.2,1.4,1.0], rotate: [0,-10,-20,-30] },
-        transition: { duration: 2.2, ease: "easeOut" },
-      };
-    case "👀": // eyes: slide sideways then zoom up
-      return { ...base,
-        initial: { opacity: 1, y: 0, x: sx, scale: 0.9 },
-        animate: { opacity: [1,1,1,0], y: [0,0,-80,-160], x: [sx, sx+50, sx+30, sx+driftX(seed)], scale: [0.9,1.0,1.4,1.2] },
-        transition: { duration: 2.1, ease: "easeOut" },
-      };
-    default:
-      return { ...base,
-        initial: { opacity: 1, y: 0, x: sx, scale: 0.7 },
-        animate: { opacity: [1,1,0], y: [0,-80,-160], scale: [0.7,1.4,1.2] },
-        transition: { duration: 2.2, ease: "easeOut" },
-      };
-  }
-}
-function driftX(seed: number) { return ((seed % 7) - 3) * 20; }
 
 const SUIT_ORDER: Record<string, number> = { spades: 0, hearts: 1, diamonds: 2, clubs: 3 };
 const RANK_VAL:  Record<string, number>  = {
@@ -161,11 +72,9 @@ export default function GameBoard({
   trickWinner,
   chatMessages,
   chatToasts,
-  reactions,
   mention,
   rematchInvite,
   sendChat,
-  sendReaction,
   onRematch,
   onDismissRematch,
   onClearSummary,
@@ -220,7 +129,6 @@ export default function GameBoard({
 
   const [lastTrick, setLastTrick] = useState<typeof state.current_trick>([]);
   const [showLastTrick, setShowLastTrick] = useState(false);
-  const [showTurnNudge, setShowTurnNudge] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
 
   // Show brief ownership toast to ALL players when any transfer happens
@@ -334,16 +242,6 @@ export default function GameBoard({
   const displayedPlayer = isSpectator ? peekedPlayer : me;
   const myTurn   = !isSpectator && !!me && state.players[state.current_player_index]?.username === username;
   const isHost   = !isSpectator && state.host_username === username;
-
-  // Turn nudge: show toast after 10s of inaction on your turn
-  useEffect(() => {
-    if (!myTurn || state.status !== "playing") {
-      setShowTurnNudge(false);
-      return;
-    }
-    const t = setTimeout(() => setShowTurnNudge(true), 10000);
-    return () => clearTimeout(t);
-  }, [myTurn, state.status, state.current_player_index]);
 
   // Confetti: fire once when game transitions to finished
   const prevStatusRef = useRef<string | null>(null);
@@ -901,20 +799,6 @@ export default function GameBoard({
 
             {/* Your hand — LEFT in landscape, BOTTOM in portrait */}
             <div className="landscape:w-[45%] portrait:order-2 portrait:shrink-0 portrait:h-[44%] flex flex-col min-h-0 bg-black/20 rounded-xl border border-white/5 p-2">
-              {/* Emoji reaction bar — single scrollable row */}
-              {!isSpectator && (
-                <div className="flex gap-1.5 mb-1.5 shrink-0 overflow-x-auto no-scrollbar">
-                  {REACTION_EMOJIS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      onClick={() => sendReaction(emoji)}
-                      className="text-base leading-none w-7 h-7 shrink-0 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/15 active:scale-90 transition-transform"
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              )}
               {/* Hand header */}
               <div className="flex items-center justify-between mb-1.5 shrink-0">
                 <span className="text-gray-400 text-[11px] font-semibold">
@@ -1389,50 +1273,8 @@ export default function GameBoard({
         )}
       </AnimatePresence>
 
-      {/* ── Turn nudge toast ────────────────────────────────────────────────────── */}
-      <AnimatePresence>
-        {showTurnNudge && (
-          <motion.div
-            key="turn-nudge"
-            initial={{ y: -40, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -40, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 400, damping: 28 }}
-            className="pointer-events-none fixed top-14 left-1/2 -translate-x-1/2 z-[70] px-4 py-2 rounded-2xl bg-red-600 border border-red-400/60 shadow-xl shadow-red-900/40 flex items-center gap-2"
-          >
-            <motion.span
-              animate={{ scale: [1, 1.3, 1] }}
-              transition={{ repeat: Infinity, duration: 0.8 }}
-              className="text-base"
-            >⏰</motion.span>
-            <span className="text-white text-xs font-bold tracking-wide">10 seconds — play your card!</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* ── Confetti burst on game over ──────────────────────────────────────────── */}
       {showConfetti && <ConfettiBurst />}
-
-      {/* ── Floating emoji reactions ───────────────────────────────────────────── */}
-      <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
-        <AnimatePresence>
-          {reactions.map((r) => {
-            const seed = r.id.charCodeAt(0) + r.id.charCodeAt(1);
-            const sx = ((seed % 9) - 4) * 10; // horizontal spread at origin
-            const anim = getEmojiAnim(r.emoji, sx, seed);
-            return (
-              <motion.div
-                key={r.id}
-                className="absolute bottom-32 left-1/2 -translate-x-1/2 flex flex-col items-center"
-                {...anim}
-              >
-                <span className="text-4xl drop-shadow-lg">{r.emoji}</span>
-                <span className="text-[10px] text-white/70 mt-0.5">{r.username}</span>
-              </motion.div>
-            );
-          })}
-        </AnimatePresence>
-      </div>
 
       {/* ── Chat toasts ────────────────────────────────────────────────────────── */}
       <div className="fixed top-14 right-3 z-50 flex flex-col gap-1.5 items-end">

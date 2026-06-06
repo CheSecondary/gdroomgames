@@ -37,8 +37,8 @@ export default function GamePage() {
   const {
     state, error, connected, roundSummary, roundHistory, trickWinner, clearSummary,
     startGame, cancelGame, kickPlayer, placeBid, playCard, endGame, chatMessages, sendChat,
-    chatToasts, reactions, mention, rematchInvite, dismissRematch,
-    sendReaction, rematch,
+    chatToasts, mention, rematchInvite, dismissRematch,
+    rematch,
     extendGame, finishGame,
     peekStatus, peekRequest, requestPeek, acceptPeek, declinePeek,
     takeoverStatus, takeoverRequest, handedOff, requestTakeover, acceptTakeover, declineTakeover, kicked,
@@ -126,12 +126,10 @@ export default function GamePage() {
       trickWinner={trickWinner}
       chatMessages={chatMessages}
       chatToasts={chatToasts}
-      reactions={reactions}
       mention={mention}
       rematchInvite={rematchInvite}
       onDismissRematch={dismissRematch}
       sendChat={sendChat}
-      sendReaction={sendReaction}
       onRematch={rematch}
       onClearSummary={clearSummary}
       onBid={placeBid}
