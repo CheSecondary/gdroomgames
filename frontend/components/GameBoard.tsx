@@ -220,6 +220,8 @@ export default function GameBoard({
 
   const [lastTrick, setLastTrick] = useState<typeof state.current_trick>([]);
   const [showLastTrick, setShowLastTrick] = useState(false);
+  const [showTurnNudge, setShowTurnNudge] = useState(false);
+  const [showConfetti, setShowConfetti] = useState(false);
 
   // Show brief ownership toast to ALL players when any transfer happens
   useEffect(() => {
@@ -295,6 +297,7 @@ export default function GameBoard({
     if (mention && sfxOn) sfxMention();
   }, [mention]);
 
+
   const toggleChat = () => {
     setShowChat(!showChat);
     if (!showChat) {
@@ -331,6 +334,43 @@ export default function GameBoard({
   const displayedPlayer = isSpectator ? peekedPlayer : me;
   const myTurn   = !isSpectator && !!me && state.players[state.current_player_index]?.username === username;
   const isHost   = !isSpectator && state.host_username === username;
+
+  // Turn nudge: show toast after 10s of inaction on your turn
+  useEffect(() => {
+    if (!myTurn || state.status !== "playing") {
+      setShowTurnNudge(false);
+      return;
+    }
+    const t = setTimeout(() => setShowTurnNudge(true), 10000);
+    return () => clearTimeout(t);
+  }, [myTurn, state.status, state.current_player_index]);
+
+  // Confetti: fire once when game transitions to finished
+  const prevStatusRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (state.status === "finished" && prevStatusRef.current !== "finished") {
+      // Only show confetti to the winner(s)
+      let isWinner = false;
+      if (state.teams_enabled && state.teams.length > 0) {
+        const teamScores = state.teams.map((seats) => {
+          const score = seats.map(s => state.players.find(p => p.seat === s))
+            .filter(Boolean)[0]?.total_score ?? 0;
+          return { seats, score };
+        });
+        const maxScore = Math.max(...teamScores.map(t => t.score));
+        const winningSeats = teamScores.find(t => t.score === maxScore)?.seats ?? [];
+        isWinner = !!me && winningSeats.includes(me.seat);
+      } else {
+        const sorted = [...state.players].sort((a, b) => b.total_score - a.total_score);
+        isWinner = sorted[0]?.username === username;
+      }
+      if (isWinner) {
+        setShowConfetti(true);
+        setTimeout(() => setShowConfetti(false), 3500);
+      }
+    }
+    prevStatusRef.current = state.status;
+  }, [state.status]);
 
   const cardKey = (c: CardType) => `${c.suit}-${c.rank}-${c.deck_id}`;
 
@@ -1348,6 +1388,30 @@ export default function GameBoard({
         )}
       </AnimatePresence>
 
+      {/* ── Turn nudge toast ────────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showTurnNudge && (
+          <motion.div
+            key="turn-nudge"
+            initial={{ y: -40, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -40, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 400, damping: 28 }}
+            className="pointer-events-none fixed top-14 left-1/2 -translate-x-1/2 z-[70] px-4 py-2 rounded-2xl bg-red-600 border border-red-400/60 shadow-xl shadow-red-900/40 flex items-center gap-2"
+          >
+            <motion.span
+              animate={{ scale: [1, 1.3, 1] }}
+              transition={{ repeat: Infinity, duration: 0.8 }}
+              className="text-base"
+            >⏰</motion.span>
+            <span className="text-white text-xs font-bold tracking-wide">10 seconds — play your card!</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Confetti burst on game over ──────────────────────────────────────────── */}
+      {showConfetti && <ConfettiBurst />}
+
       {/* ── Floating emoji reactions ───────────────────────────────────────────── */}
       <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
         <AnimatePresence>
@@ -1604,6 +1668,34 @@ function MobileScoreStrip({
   );
 }
 
+// ── Confetti burst ────────────────────────────────────────────────────────────
+const CONFETTI_COLORS = ["#facc15","#f87171","#34d399","#60a5fa","#c084fc","#fb923c","#f472b6"];
+function ConfettiBurst() {
+  const pieces = Array.from({ length: 60 }, (_, i) => ({
+    id: i,
+    x: Math.random() * 100,          // vw start position
+    delay: Math.random() * 0.6,
+    duration: 2.2 + Math.random() * 1.2,
+    size: 6 + Math.random() * 8,
+    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    rotate: Math.random() * 720 - 360,
+    drift: (Math.random() - 0.5) * 120,
+  }));
+  return (
+    <div className="pointer-events-none fixed inset-0 z-[90] overflow-hidden">
+      {pieces.map((p) => (
+        <motion.div
+          key={p.id}
+          initial={{ x: `calc(${p.x}vw + ${p.drift * -0.5}px)`, y: "-10vh", opacity: 1, rotate: 0, scale: 1 }}
+          animate={{ x: `calc(${p.x}vw + ${p.drift}px)`, y: "110vh", opacity: [1, 1, 0], rotate: p.rotate, scale: [1, 0.8, 0.5] }}
+          transition={{ duration: p.duration, delay: p.delay, ease: "easeIn" }}
+          style={{ position: "absolute", width: p.size, height: p.size, borderRadius: Math.random() > 0.5 ? "50%" : "2px", background: p.color }}
+        />
+      ))}
+    </div>
+  );
+}
+
 function GameOverBanner({
   players,
   teamsEnabled,
@@ -1623,7 +1715,6 @@ function GameOverBanner({
     const teamResults = teams
       .map((seats, ti) => {
         const members = seats.map((s) => players.find((p) => p.seat === s)).filter(Boolean) as typeof players;
-        // All team members share the same total_score — use members[0] to avoid doubling
         const score = members[0]?.total_score ?? 0;
         return { ti, members, score };
       })
