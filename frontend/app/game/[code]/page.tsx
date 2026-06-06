@@ -37,7 +37,7 @@ export default function GamePage() {
   const {
     state, error, connected, roundSummary, roundHistory, trickWinner, clearSummary,
     startGame, cancelGame, kickPlayer, placeBid, playCard, endGame, chatMessages, sendChat,
-    chatToasts, reactions, rematchInvite, dismissRematch,
+    chatToasts, reactions, mention, rematchInvite, dismissRematch,
     sendReaction, rematch,
     extendGame, finishGame,
     peekStatus, peekRequest, requestPeek, acceptPeek, declinePeek,
@@ -108,6 +108,7 @@ export default function GamePage() {
       chatMessages={chatMessages}
       chatToasts={chatToasts}
       reactions={reactions}
+      mention={mention}
       rematchInvite={rematchInvite}
       onDismissRematch={dismissRematch}
       sendChat={sendChat}

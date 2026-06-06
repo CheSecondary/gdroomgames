@@ -1,31 +1,59 @@
 "use client";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from "react";
 
 interface Props {
   gameCode: string;
   username: string;
+  onMutedUidsChange?: (uids: Set<string>) => void;
+  onLiveChange?: (live: boolean) => void;
 }
 
-// Generate a unique Agora UID per browser session so the same player
-// can open multiple tabs without a UID_CONFLICT error.
-function makeAgoraUid(username: string): string {
-  const key = `os_agora_uid_${username}`;
-  let uid = sessionStorage.getItem(key);
-  if (!uid) {
-    uid = `${username.slice(0, 12)}_${Math.random().toString(36).slice(2, 7)}`;
-    sessionStorage.setItem(key, uid);
-  }
-  return uid;
+export interface VoiceChatHandle {
+  toggleMuteUid: (uid: string) => void;
 }
 
-export default function VoiceChat({ gameCode, username }: Props) {
+const VoiceChat = forwardRef<VoiceChatHandle, Props>(function VoiceChat(
+  { gameCode, username, onMutedUidsChange, onLiveChange },
+  ref
+) {
   const [phase, setPhase] = useState<"idle" | "joining" | "live" | "error">("idle");
   const [muted, setMuted] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [mutedUids, setMutedUids] = useState<Set<string>>(new Set());
   const clientRef = useRef<any>(null);
   const localTrackRef = useRef<any>(null);
+  // track audio tracks by uid so toggleMuteUid can play/stop them
+  const audioTracksRef = useRef<Map<string, any>>(new Map());
 
   const appId = process.env.NEXT_PUBLIC_AGORA_APP_ID;
+
+  // Propagate mutedUids up
+  useEffect(() => {
+    onMutedUidsChange?.(mutedUids);
+  }, [mutedUids, onMutedUidsChange]);
+
+  // Propagate live state up
+  useEffect(() => {
+    onLiveChange?.(phase === "live");
+  }, [phase, onLiveChange]);
+
+  // Expose toggleMuteUid to parent
+  useImperativeHandle(ref, () => ({
+    toggleMuteUid: (uid: string) => {
+      const track = audioTracksRef.current.get(uid);
+      setMutedUids(prev => {
+        const next = new Set(prev);
+        if (next.has(uid)) {
+          track?.play();
+          next.delete(uid);
+        } else {
+          track?.stop();
+          next.add(uid);
+        }
+        return next;
+      });
+    },
+  }));
 
   // Cleanup on unmount
   useEffect(() => {
@@ -41,20 +69,42 @@ export default function VoiceChat({ gameCode, username }: Props) {
 
     try {
       const AgoraRTC = (await import("agora-rtc-sdk-ng")).default;
-
-      // Silence Agora's noisy console logs in dev
-      AgoraRTC.setLogLevel(3); // 3 = ERROR only
+      AgoraRTC.setLogLevel(3);
 
       const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
       clientRef.current = client;
 
       client.on("user-published", async (user: any, mediaType: "audio" | "video") => {
         await client.subscribe(user, mediaType);
-        if (mediaType === "audio") user.audioTrack?.play();
+        if (mediaType === "audio") {
+          const uid = String(user.uid);
+          audioTracksRef.current.set(uid, user.audioTrack);
+          // Only play if not locally muted
+          setMutedUids(prev => {
+            if (!prev.has(uid)) user.audioTrack?.play();
+            return prev;
+          });
+        }
       });
 
-      // Let Agora automatically generate a guaranteed-unique Integer UID
-      await client.join(appId, gameCode, null, null);
+      client.on("user-unpublished", (user: any, mediaType: "audio" | "video") => {
+        if (mediaType === "audio") {
+          audioTracksRef.current.delete(String(user.uid));
+        }
+      });
+
+      client.on("user-left", (user: any) => {
+        audioTracksRef.current.delete(String(user.uid));
+        // Remove from muted set too so they start fresh if they rejoin
+        setMutedUids(prev => {
+          const next = new Set(prev);
+          next.delete(String(user.uid));
+          return next;
+        });
+      });
+
+      // Use username as string UID so chips can match by name
+      await client.join(appId, gameCode, null, username);
 
       const micTrack = await AgoraRTC.createMicrophoneAudioTrack();
       localTrackRef.current = micTrack;
@@ -80,8 +130,10 @@ export default function VoiceChat({ gameCode, username }: Props) {
     localTrackRef.current = null;
     await clientRef.current?.leave().catch(() => {});
     clientRef.current = null;
+    audioTracksRef.current.clear();
     setPhase("idle");
     setMuted(false);
+    setMutedUids(new Set());
   };
 
   if (!appId) {
@@ -103,13 +155,12 @@ export default function VoiceChat({ gameCode, username }: Props) {
         {phase === "live" && (
           <span className="flex items-center gap-1 text-emerald-400 text-xs font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Live
+            Live · tap a name to mute
           </span>
         )}
       </div>
 
       {phase === "idle" && (
-        /* Require explicit click → satisfies browser autoplay policy */
         <button
           onClick={joinVoice}
           className="w-full py-2 rounded-lg bg-emerald-700/50 hover:bg-emerald-700 text-white text-sm font-semibold transition-all"
@@ -135,7 +186,7 @@ export default function VoiceChat({ gameCode, username }: Props) {
                 : "bg-emerald-700/60 hover:bg-emerald-700 text-white"
             }`}
           >
-            {muted ? "🔇 Unmuted" : "🎙️ Mute"}
+            {muted ? "🔇 Unmute me" : "🎙️ Mute me"}
           </button>
           <button
             onClick={leaveVoice}
@@ -160,4 +211,6 @@ export default function VoiceChat({ gameCode, username }: Props) {
       )}
     </div>
   );
-}
+});
+
+export default VoiceChat;

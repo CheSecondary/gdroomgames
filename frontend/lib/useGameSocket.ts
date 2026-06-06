@@ -22,7 +22,10 @@ export interface Reaction {
   emoji: string;
 }
 
-export const REACTION_EMOJIS = ["🔥", "😂", "💀", "👏", "😤", "🎉"] as const;
+export const REACTION_EMOJIS = [
+  "🔥", "😂", "💀", "👏", "😤", "🎉",
+  "🫡", "💯", "🤡", "😱", "🤌", "👀",
+] as const;
 
 export interface GameStartOverrides {
   seatOrder?: string[];
@@ -41,6 +44,7 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatToasts, setChatToasts]     = useState<ChatMessage[]>([]);
   const [reactions, setReactions]       = useState<Reaction[]>([]);
+  const [mention, setMention]           = useState<{ from: string; message: string } | null>(null);
   const [rematchInvite, setRematchInvite] = useState<{ code: string; host: string } | null>(null);
   const [peekStatus, setPeekStatus] = useState<PeekStatus>("idle");
   const [peekRequest, setPeekRequest] = useState<{ spectator: string; targetSeat: number } | null>(null);
@@ -101,6 +105,14 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
           setTimeout(() => {
             setChatToasts((prev) => prev.filter((t) => t.id !== entry.id));
           }, 4000);
+          // @mention detection — case-insensitive, skip own messages
+          if (
+            entry.username !== username &&
+            new RegExp(`@${username}`, "i").test(entry.message)
+          ) {
+            setMention({ from: entry.username, message: entry.message });
+            setTimeout(() => setMention(null), 2200);
+          }
         } else if (msg.type === "reaction") {
           const r: Reaction = {
             id: Math.random().toString(36).substring(2, 9),
@@ -223,6 +235,7 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
     chatMessages,
     chatToasts,
     reactions,
+    mention,
     rematchInvite,
     peekStatus,
     peekRequest,

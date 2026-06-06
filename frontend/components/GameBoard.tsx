@@ -5,12 +5,12 @@ import Card from "./Card";
 import Scoreboard from "./Scoreboard";
 import BidPanel from "./BidPanel";
 import RoundSummary from "./RoundSummary";
-import VoiceChat from "./VoiceChat";
+import VoiceChat, { type VoiceChatHandle } from "./VoiceChat";
 import type { GameState, Card as CardType, RoundScore } from "@/lib/types";
 import { TEAM_COLORS } from "@/lib/types";
 import type { ChatMessage, Reaction, PeekStatus, TakeoverStatus } from "@/lib/useGameSocket";
 import { REACTION_EMOJIS } from "@/lib/useGameSocket";
-import { sfxCardPlay, sfxYourTurn, sfxTrickWon, sfxRoundEnd, sfxChatMessage } from "@/lib/sounds";
+import { sfxCardPlay, sfxYourTurn, sfxTrickWon, sfxRoundEnd, sfxChatMessage, sfxMention } from "@/lib/sounds";
 
 interface Props {
   state: GameState;
@@ -23,6 +23,7 @@ interface Props {
   chatMessages: ChatMessage[];
   chatToasts: ChatMessage[];
   reactions: Reaction[];
+  mention: { from: string; message: string } | null;
   rematchInvite: { code: string; host: string } | null;
   sendChat: (message: string) => void;
   sendReaction: (emoji: string) => void;
@@ -53,6 +54,94 @@ interface Props {
   onDeclineTakeover?: (requester: string) => void;
 }
 
+
+/** Per-emoji Framer Motion animation props — each emoji has its own personality. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getEmojiAnim(emoji: string, sx: number, seed: number): Record<string, any> {
+  const base = { exit: { opacity: 0 } };
+  switch (emoji) {
+    case "🔥": // fire: wobble side to side while rising
+      return { ...base,
+        initial: { opacity: 1, y: 0, x: sx, scale: 0.7, rotate: 0 },
+        animate: { opacity: [1,1,1,0], y: [0,-40,-100,-160], x: [sx, sx+14, sx-10, sx+6, sx+driftX(seed)], scale: [0.7,1.1,1.3,1.1], rotate: [0,8,-8,4,-4,0] },
+        transition: { duration: 2.2, ease: "easeOut" },
+      };
+    case "😂": // laughing: bouncy scale while floating
+      return { ...base,
+        initial: { opacity: 1, y: 0, x: sx, scale: 0.5 },
+        animate: { opacity: [1,1,1,0], y: [0,-30,-90,-160], scale: [0.5,1.4,1.0,1.5,1.2,0.9] },
+        transition: { duration: 2.0, ease: "easeOut" },
+      };
+    case "💀": // skull: full spin while rising
+      return { ...base,
+        initial: { opacity: 1, y: 0, x: sx, scale: 0.8, rotate: 0 },
+        animate: { opacity: [1,1,1,0], y: [0,-60,-160], scale: [0.8,1.4,1.2], rotate: [0, 180, 360] },
+        transition: { duration: 2.4, ease: "linear" },
+      };
+    case "👏": // clap: pulse in/out like clapping, drifts up
+      return { ...base,
+        initial: { opacity: 1, y: 0, x: sx, scale: 0.8 },
+        animate: { opacity: [1,1,1,0], y: [0,-50,-120,-160], scale: [0.8,1.3,0.9,1.3,0.9,1.4,1.0] },
+        transition: { duration: 2.1, ease: "easeOut" },
+      };
+    case "😤": // angry: rapid horizontal shake, then launch
+      return { ...base,
+        initial: { opacity: 1, y: 0, x: sx, scale: 1 },
+        animate: { opacity: [1,1,1,1,0], y: [0,-10,-10,-90,-160], x: [sx,sx+12,sx-12,sx+8,sx-8,sx+4,sx+driftX(seed)], scale: [1,1.1,1.1,1.3,1.0] },
+        transition: { duration: 2.0, ease: "easeOut" },
+      };
+    case "🎉": // party: zigzag left-right while soaring
+      return { ...base,
+        initial: { opacity: 1, y: 0, x: sx, scale: 0.6, rotate: -20 },
+        animate: { opacity: [1,1,1,0], y: [0,-40,-100,-160], x: [sx, sx+30, sx-20, sx+40, sx+driftX(seed)], scale: [0.6,1.2,1.4,1.5], rotate: [-20,15,-10,20,0] },
+        transition: { duration: 2.5, ease: "easeOut" },
+      };
+    case "🫡": // salute: slide straight up, slight tilt
+      return { ...base,
+        initial: { opacity: 1, y: 0, x: sx, scale: 0.9, rotate: -5 },
+        animate: { opacity: [1,1,1,0], y: [0,-60,-130,-180], scale: [0.9,1.2,1.3,1.1], rotate: [-5,0,5,0] },
+        transition: { duration: 2.0, ease: "easeOut" },
+      };
+    case "💯": // 100: zoom up super fast, overshoot
+      return { ...base,
+        initial: { opacity: 1, y: 0, x: sx, scale: 0.4 },
+        animate: { opacity: [1,1,1,0], y: [0,-30,-140,-200], scale: [0.4,2.0,1.5,1.0] },
+        transition: { duration: 1.6, ease: [0.2,1.4,0.5,1] },
+      };
+    case "🤡": // clown: wobble rotate + float
+      return { ...base,
+        initial: { opacity: 1, y: 0, x: sx, scale: 0.7, rotate: 0 },
+        animate: { opacity: [1,1,1,0], y: [0,-50,-130,-160], x: [sx,sx+20,sx-15,sx+10,sx+driftX(seed)], scale: [0.7,1.2,1.4,1.2], rotate: [0,-20,20,-15,10,0] },
+        transition: { duration: 2.3, ease: "easeOut" },
+      };
+    case "😱": // scream: explode outward, fade
+      return { ...base,
+        initial: { opacity: 1, y: 0, x: sx, scale: 0.5 },
+        animate: { opacity: [1,1,0.6,0], y: [0,-20,-80,-120], scale: [0.5,2.2,2.5,1.8] },
+        transition: { duration: 1.8, ease: "easeOut" },
+      };
+    case "🤌": // chef's kiss: graceful curve up and out
+      return { ...base,
+        initial: { opacity: 1, y: 0, x: sx, scale: 0.8, rotate: 0 },
+        animate: { opacity: [1,1,1,0], y: [0,-50,-120,-180], x: [sx, sx+40, sx+60, sx+50], scale: [0.8,1.2,1.4,1.0], rotate: [0,-10,-20,-30] },
+        transition: { duration: 2.2, ease: "easeOut" },
+      };
+    case "👀": // eyes: slide sideways then zoom up
+      return { ...base,
+        initial: { opacity: 1, y: 0, x: sx, scale: 0.9 },
+        animate: { opacity: [1,1,1,0], y: [0,0,-80,-160], x: [sx, sx+50, sx+30, sx+driftX(seed)], scale: [0.9,1.0,1.4,1.2] },
+        transition: { duration: 2.1, ease: "easeOut" },
+      };
+    default:
+      return { ...base,
+        initial: { opacity: 1, y: 0, x: sx, scale: 0.7 },
+        animate: { opacity: [1,1,0], y: [0,-80,-160], scale: [0.7,1.4,1.2] },
+        transition: { duration: 2.2, ease: "easeOut" },
+      };
+  }
+}
+function driftX(seed: number) { return ((seed % 7) - 3) * 20; }
+
 const SUIT_ORDER: Record<string, number> = { spades: 0, hearts: 1, diamonds: 2, clubs: 3 };
 const RANK_VAL:  Record<string, number>  = {
   "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7,
@@ -73,6 +162,7 @@ export default function GameBoard({
   chatMessages,
   chatToasts,
   reactions,
+  mention,
   rematchInvite,
   sendChat,
   sendReaction,
@@ -106,11 +196,17 @@ export default function GameBoard({
   const [showMenu,       setShowMenu]       = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [showVoice,      setShowVoice]      = useState(false);
+  const [voiceIsLive,    setVoiceIsLive]    = useState(false);
+  const [voiceMutedUids, setVoiceMutedUids] = useState<Set<string>>(new Set());
+  const voiceChatRef = useRef<VoiceChatHandle>(null);
 
   const [showChat, setShowChat] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [lastReadCount, setLastReadCount] = useState(0);
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null); // null = closed
+  const [mentionIndex, setMentionIndex] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
 
   const [sfxOn, setSfxOn] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -194,6 +290,11 @@ export default function GameBoard({
     if (chatToasts.length > 0 && !showChat && sfxOn) sfxChatMessage();
   }, [chatToasts.length]);
 
+  // Sound: @mention
+  useEffect(() => {
+    if (mention && sfxOn) sfxMention();
+  }, [mention]);
+
   const toggleChat = () => {
     setShowChat(!showChat);
     if (!showChat) {
@@ -218,6 +319,8 @@ export default function GameBoard({
     if (!chatInput.trim()) return;
     sendChat(chatInput.trim());
     setChatInput("");
+    setMentionQuery(null);
+    setMentionIndex(0);
   };
 
   const me       = state.players.find((p) => p.username === username);
@@ -435,7 +538,13 @@ export default function GameBoard({
         className="shrink-0 px-3 py-2 bg-black/50 border-b border-white/5 z-10"
         style={{ display: showVoice ? "block" : "none" }}
       >
-        <VoiceChat gameCode={gameCode} username={username} />
+        <VoiceChat
+          ref={voiceChatRef}
+          gameCode={gameCode}
+          username={username}
+          onLiveChange={setVoiceIsLive}
+          onMutedUidsChange={setVoiceMutedUids}
+        />
       </div>
 
       {/* ── Error toast ───────────────────────────────────────────────────────── */}
@@ -740,6 +849,9 @@ export default function GameBoard({
               myUsername={username}
               currentPlayerIndex={state.current_player_index}
               teamsEnabled={state.teams_enabled}
+              voiceIsLive={voiceIsLive}
+              voiceMutedUids={voiceMutedUids}
+              onToggleVoiceMute={(uid) => voiceChatRef.current?.toggleMuteUid(uid)}
             />
           </div>
 
@@ -748,14 +860,14 @@ export default function GameBoard({
 
             {/* Your hand — LEFT in landscape, BOTTOM in portrait */}
             <div className="landscape:w-[45%] portrait:order-2 portrait:shrink-0 portrait:h-[44%] flex flex-col min-h-0 bg-black/20 rounded-xl border border-white/5 p-2">
-              {/* Emoji reaction bar */}
+              {/* Emoji reaction bar — single scrollable row */}
               {!isSpectator && (
-                <div className="flex gap-1.5 mb-1.5 shrink-0 justify-center">
+                <div className="flex gap-1.5 mb-1.5 shrink-0 overflow-x-auto no-scrollbar">
                   {REACTION_EMOJIS.map((emoji) => (
                     <button
                       key={emoji}
                       onClick={() => sendReaction(emoji)}
-                      className="text-base leading-none w-7 h-7 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/15 active:scale-90 transition-transform"
+                      className="text-base leading-none w-7 h-7 shrink-0 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/15 active:scale-90 transition-transform"
                     >
                       {emoji}
                     </button>
@@ -1062,9 +1174,21 @@ export default function GameBoard({
                         {msg.isSpectator && <span className="text-yellow-600 mr-0.5">👁️</span>}
                         {msg.username}
                       </span>
-                      <div className={`rounded-xl px-3 py-1.5 max-w-[85%] break-words leading-relaxed ${isMe ? "bg-yellow-400 text-gray-900 font-medium shadow-md shadow-yellow-400/10" : msg.isSpectator ? "bg-yellow-400/10 text-yellow-200 border border-yellow-400/20" : "bg-white/10 text-white"}`}>
-                        {msg.message}
-                      </div>
+                      {(() => {
+                        const hasMention = /@\w+/.test(msg.message);
+                        const bubbleCls = hasMention
+                          ? "bg-red-600/80 text-white shadow-md shadow-red-500/20"
+                          : isMe
+                          ? "bg-yellow-400 text-gray-900 font-medium shadow-md shadow-yellow-400/10"
+                          : msg.isSpectator
+                          ? "bg-yellow-400/10 text-yellow-200 border border-yellow-400/20"
+                          : "bg-white/10 text-white";
+                        return (
+                          <div className={`rounded-xl px-3 py-1.5 max-w-[85%] break-words leading-relaxed ${bubbleCls}`}>
+                            {msg.message}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })
@@ -1072,23 +1196,89 @@ export default function GameBoard({
               <div ref={chatEndRef} />
             </div>
 
-            {/* Chat input */}
-            <form onSubmit={handleChatSubmit} className="flex gap-2 shrink-0">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Type a message..."
-                maxLength={100}
-                className="flex-1 bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-yellow-400/50"
-              />
-              <button
-                type="submit"
-                className="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold px-3 py-2 rounded-xl text-xs transition-all shadow-md shadow-yellow-400/10 shrink-0"
-              >
-                Send
-              </button>
-            </form>
+            {/* Chat input with @mention autocomplete */}
+            <div className="shrink-0 relative">
+              {/* @mention picker */}
+              {mentionQuery !== null && (() => {
+                const q = mentionQuery.toLowerCase();
+                const suggestions = state.players
+                  .filter(p => p.username !== username && p.username.toLowerCase().includes(q));
+                const pickSuggestion = (uname: string) => {
+                  const before = chatInput.slice(0, chatInput.lastIndexOf("@"));
+                  setChatInput(before + "@" + uname + " ");
+                  setMentionQuery(null);
+                  setMentionIndex(0);
+                  chatInputRef.current?.focus();
+                };
+                return suggestions.length > 0 ? (
+                  <div className="absolute bottom-full mb-1 left-0 right-0 bg-gray-900 border border-white/15 rounded-xl overflow-hidden shadow-xl z-10">
+                    {suggestions.map((p, i) => (
+                      <button
+                        key={p.username}
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); pickSuggestion(p.username); }}
+                        className={`w-full text-left px-3 py-2 text-xs text-white flex items-center gap-2 ${i === mentionIndex ? "bg-white/15" : "hover:bg-white/10"}`}
+                      >
+                        <span className="text-yellow-400 font-semibold">@{p.username}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null;
+              })()}
+              <form onSubmit={handleChatSubmit} className="flex gap-2">
+                <input
+                  ref={chatInputRef}
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setChatInput(val);
+                    const atIdx = val.lastIndexOf("@");
+                    if (atIdx !== -1 && (atIdx === 0 || val[atIdx - 1] === " ")) {
+                      setMentionQuery(val.slice(atIdx + 1));
+                      setMentionIndex(0);
+                    } else {
+                      setMentionQuery(null);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (mentionQuery === null) return;
+                    const q = mentionQuery.toLowerCase();
+                    const suggestions = state.players.filter(
+                      p => p.username !== username && p.username.toLowerCase().includes(q)
+                    );
+                    if (!suggestions.length) return;
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      setMentionIndex(i => Math.min(i + 1, suggestions.length - 1));
+                    } else if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      setMentionIndex(i => Math.max(i - 1, 0));
+                    } else if (e.key === "Enter") {
+                      e.preventDefault();
+                      const before = chatInput.slice(0, chatInput.lastIndexOf("@"));
+                      setChatInput(before + "@" + suggestions[mentionIndex].username + " ");
+                      setMentionQuery(null);
+                      setMentionIndex(0);
+                    } else if (e.key === "Escape") {
+                      setMentionQuery(null);
+                    }
+                  }}
+                  placeholder="Message… @ to call someone out"
+                  maxLength={100}
+                  className="flex-1 bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white text-xs placeholder-gray-600 focus:outline-none focus:border-yellow-400/50"
+                />
+                <button
+                  type="submit"
+                  className="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold px-3 py-2 rounded-xl text-xs transition-all shadow-md shadow-yellow-400/10 shrink-0"
+                >
+                  Send
+                </button>
+              </form>
+              <p className="text-gray-600 text-[10px] mt-1 px-1">
+                💡 type <span className="text-yellow-500 font-mono">@name</span> to call someone out
+              </p>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1127,22 +1317,55 @@ export default function GameBoard({
         )}
       </AnimatePresence>
 
+      {/* ── @mention fullscreen callout ─────────────────────────────────────────── */}
+      <AnimatePresence>
+        {mention && (
+          <motion.div
+            key="mention-overlay"
+            initial={{ opacity: 0, scale: 1.08 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.18 }}
+            className="pointer-events-none fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ y: -24, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 12, opacity: 0 }}
+              transition={{ duration: 0.22 }}
+              className="flex flex-col items-center gap-2 px-8 py-6 rounded-2xl bg-yellow-400/10 border border-yellow-400/40"
+            >
+              <span className="text-4xl">📣</span>
+              <span className="text-yellow-300 font-extrabold text-xl tracking-wide">@{username}</span>
+              <span className="text-white/70 text-sm text-center max-w-[240px] leading-snug">
+                <span className="text-yellow-400 font-semibold">{mention.from}</span> called you out
+              </span>
+              <span className="text-white/90 text-sm text-center max-w-[260px] italic leading-snug">
+                "{mention.message.replace(new RegExp(`@${username}`, "gi"), `@${username}`)}"
+              </span>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Floating emoji reactions ───────────────────────────────────────────── */}
       <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
         <AnimatePresence>
-          {reactions.map((r) => (
-            <motion.div
-              key={r.id}
-              initial={{ opacity: 1, y: 0, scale: 0.8 }}
-              animate={{ opacity: 0, y: -120, scale: 1.4 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 2.2, ease: "easeOut" }}
-              className="absolute bottom-32 left-1/2 -translate-x-1/2 flex flex-col items-center"
-            >
-              <span className="text-4xl drop-shadow-lg">{r.emoji}</span>
-              <span className="text-[10px] text-white/70 mt-0.5">{r.username}</span>
-            </motion.div>
-          ))}
+          {reactions.map((r) => {
+            const seed = r.id.charCodeAt(0) + r.id.charCodeAt(1);
+            const sx = ((seed % 9) - 4) * 10; // horizontal spread at origin
+            const anim = getEmojiAnim(r.emoji, sx, seed);
+            return (
+              <motion.div
+                key={r.id}
+                className="absolute bottom-32 left-1/2 -translate-x-1/2 flex flex-col items-center"
+                {...anim}
+              >
+                <span className="text-4xl drop-shadow-lg">{r.emoji}</span>
+                <span className="text-[10px] text-white/70 mt-0.5">{r.username}</span>
+              </motion.div>
+            );
+          })}
         </AnimatePresence>
       </div>
 
@@ -1206,11 +1429,17 @@ function OtherPlayers({
   myUsername,
   currentPlayerIndex,
   teamsEnabled,
+  voiceIsLive,
+  voiceMutedUids,
+  onToggleVoiceMute,
 }: {
   players: GameState["players"];
   myUsername: string;
   currentPlayerIndex: number;
   teamsEnabled: boolean;
+  voiceIsLive?: boolean;
+  voiceMutedUids?: Set<string>;
+  onToggleVoiceMute?: (uid: string) => void;
 }) {
   const others = players.filter((p) => p.username !== myUsername);
   if (!others.length) return null;
@@ -1223,6 +1452,8 @@ function OtherPlayers({
           ? TEAM_COLORS[p.team_index % TEAM_COLORS.length]
           : null;
 
+        const isVoiceMuted = voiceIsLive && voiceMutedUids?.has(p.username);
+
         return (
           <motion.div
             key={p.seat}
@@ -1232,9 +1463,13 @@ function OtherPlayers({
                 : {}
             }
             transition={{ repeat: Infinity, duration: 1.4 }}
+            onClick={voiceIsLive ? () => onToggleVoiceMute?.(p.username) : undefined}
             className={`
               flex items-center gap-1.5 px-2 py-1 rounded-lg border text-[11px] transition-all
-              ${isActive
+              ${voiceIsLive ? "cursor-pointer select-none" : ""}
+              ${isVoiceMuted
+                ? "border-red-500/40 bg-red-900/10 opacity-50"
+                : isActive
                 ? "border-yellow-400/60 bg-yellow-400/5 text-yellow-300"
                 : teamColor
                 ? `${teamColor.bg} ${teamColor.border} ${teamColor.text}`
@@ -1252,6 +1487,7 @@ function OtherPlayers({
             <span className="text-gray-600 text-[9px]">
               B:{p.bid >= 0 ? p.bid : "—"} W:{p.tricks_won}
             </span>
+            {isVoiceMuted && <span className="text-red-400 text-[10px] ml-auto">🔇</span>}
           </motion.div>
         );
       })}

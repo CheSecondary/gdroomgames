@@ -213,7 +213,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         )
 
     async def handle_send_reaction(self, data):
-        ALLOWED = {"🔥", "😂", "💀", "👏", "😤", "🎉"}
+        ALLOWED = {"🔥", "😂", "💀", "👏", "😤", "🎉", "🫡", "💯", "🤡", "😱", "🤌", "👀"}
         emoji = data.get("emoji", "")
         if emoji not in ALLOWED:
             return
