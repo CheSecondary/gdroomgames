@@ -41,7 +41,7 @@ export default function GamePage() {
     sendReaction, rematch,
     extendGame, finishGame,
     peekStatus, peekRequest, requestPeek, acceptPeek, declinePeek,
-    takeoverStatus, takeoverRequest, handedOff, requestTakeover, acceptTakeover, declineTakeover,
+    takeoverStatus, takeoverRequest, handedOff, requestTakeover, acceptTakeover, declineTakeover, kicked,
   } = useGameSocket(code, username ?? "", spectateSeat, takeoverSeat);
 
   // Auto-send peek/takeover request once state arrives
@@ -55,6 +55,25 @@ export default function GamePage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state !== null]);
+
+  // ── Kicked — check first before anything else ────────────────────────────
+  if (kicked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-950 p-6">
+        <div className="flex flex-col items-center gap-4 bg-black/60 border border-red-500/30 rounded-2xl px-8 py-8 max-w-xs w-full text-center shadow-2xl">
+          <span className="text-5xl">🚫</span>
+          <h2 className="text-white font-bold text-lg">You were kicked</h2>
+          <p className="text-gray-400 text-sm">The host removed you from this game.</p>
+          <button
+            onClick={() => { window.location.href = "/lobby"; }}
+            className="mt-2 w-full bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold py-2.5 rounded-xl text-sm transition-all"
+          >
+            Back to Lobby
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ── Loading states ────────────────────────────────────────────────
   if (!ready || !username) {

@@ -51,6 +51,7 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
   const [takeoverStatus, setTakeoverStatus] = useState<TakeoverStatus>("idle");
   const [takeoverRequest, setTakeoverRequest] = useState<{ requester: string; targetSeat: number } | null>(null);
   const [handedOff, setHandedOff] = useState<{ to: string; from: string; seat: number } | null>(null);
+  const [kicked, setKicked] = useState(false);
 
   useEffect(() => {
     if (!username) return;
@@ -147,7 +148,7 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
           }
         } else if (msg.type === "player_kicked") {
           if (msg.username === username) {
-            window.location.href = "/lobby";
+            setKicked(true);
           }
         } else if (msg.type === "game_cancelled") {
           window.location.href = "/lobby";
@@ -242,6 +243,7 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
     takeoverStatus,
     takeoverRequest,
     handedOff,
+    kicked,
     clearSummary,
     startGame,
     cancelGame,

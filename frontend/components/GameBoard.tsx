@@ -875,6 +875,7 @@ export default function GameBoard({
             teamsEnabled={state.teams_enabled}
             teams={state.teams}
             isHost={state.host_username === username}
+            roundHistory={roundHistory}
             onNewGame={() => { window.location.href = "/lobby"; }}
             onRematch={onRematch}
           />
@@ -1696,11 +1697,32 @@ function ConfettiBurst() {
   );
 }
 
+function BidAccuracyBadge({ usernames, roundHistory }: {
+  usernames: string[];
+  roundHistory: { round: number; scores: RoundScore[] }[];
+}) {
+  let won = 0, placed = 0;
+  for (const r of roundHistory) {
+    for (const name of usernames) {
+      const s = r.scores.find(s => s.username === name);
+      if (s && s.bid >= 0) {
+        placed += s.bid;
+        won += s.tricks_won;
+      }
+    }
+  }
+  if (!placed && !won) return null;
+  return (
+    <span className="text-[10px] font-mono text-gray-400 ml-1">{won}/{placed}</span>
+  );
+}
+
 function GameOverBanner({
   players,
   teamsEnabled,
   teams,
   isHost,
+  roundHistory,
   onNewGame,
   onRematch,
 }: {
@@ -1708,6 +1730,7 @@ function GameOverBanner({
   teamsEnabled: boolean;
   teams: number[][];
   isHost: boolean;
+  roundHistory: { round: number; scores: RoundScore[] }[];
   onNewGame: () => void;
   onRematch: () => void;
 }) {
@@ -1739,7 +1762,10 @@ function GameOverBanner({
             const c = TEAM_COLORS[ti % TEAM_COLORS.length];
             return (
               <div key={ti} className={`flex justify-between text-sm px-3 py-1.5 rounded-lg ${c.bg} border ${c.border}`}>
-                <span className={c.text}>{rank + 1}. {members.map((p) => p.username).join(" & ")}</span>
+                <span className={c.text}>
+                  {rank + 1}. {members.map(p => p.username).join(" & ")}
+                  <BidAccuracyBadge usernames={members.map(p => p.username)} roundHistory={roundHistory} />
+                </span>
                 <span className={score >= 0 ? "text-emerald-400" : "text-red-400"}>
                   {score > 0 ? `+${score}` : score}
                 </span>
@@ -1776,7 +1802,7 @@ function GameOverBanner({
       <div className="space-y-1.5 mb-5">
         {sorted.map((p, i) => (
           <div key={p.seat} className="flex justify-between text-sm text-gray-300 px-2">
-            <span>{i + 1}. {p.username}</span>
+            <span>{i + 1}. {p.username}<BidAccuracyBadge usernames={[p.username]} roundHistory={roundHistory} /></span>
             <span className={p.total_score >= 0 ? "text-emerald-400" : "text-red-400"}>
               {p.total_score > 0 ? `+${p.total_score}` : p.total_score}
             </span>
