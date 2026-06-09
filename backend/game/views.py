@@ -272,3 +272,23 @@ class ResumeFromExportView(APIView):
             "teams_enabled": snap["teams_enabled"],
             "players":       players,
         }, status=status.HTTP_201_CREATED)
+
+
+class ListWaitingGamesView(APIView):
+    """Return all games currently in the waiting (lobby) stage."""
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        games = Game.objects.filter(status="waiting").order_by("-created_at")
+        result = []
+        for g in games:
+            players = list(g.players.order_by("seat").values_list("username", flat=True))
+            result.append({
+                "code":             g.code,
+                "host":             g.host_username,
+                "expected_players": g.expected_players,
+                "joined":           len(players),
+                "players":          players,
+                "teams_enabled":    g.teams_enabled,
+            })
+        return Response(result)

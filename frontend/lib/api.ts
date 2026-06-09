@@ -34,4 +34,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ username, content }),
     }),
+
+  listWaitingGames: () => req("/api/game/lobby/"),
 };

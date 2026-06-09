@@ -30,6 +30,11 @@ export default function LobbyPage() {
 
   // Join form
   const [joinCode, setJoinCode] = useState("");
+  const [waitingGames, setWaitingGames] = useState<{
+    code: string; host: string; expected_players: number;
+    joined: number; players: string[]; teams_enabled: boolean;
+  }[]>([]);
+  const [gamesLoading, setGamesLoading] = useState(false);
 
   // Spectator player picker (shown when joining a started game)
   const [spectateGame, setSpectateGame] = useState<{ code: string; players: PlayerOption[] } | null>(null);
@@ -92,6 +97,15 @@ export default function LobbyPage() {
     if (!saved) { router.push("/"); return; }
     setUsername(saved);
   }, [router]);
+
+  useEffect(() => {
+    if (tab !== "join") return;
+    setGamesLoading(true);
+    api.listWaitingGames()
+      .then((data) => setWaitingGames(data as any))
+      .catch(() => setWaitingGames([]))
+      .finally(() => setGamesLoading(false));
+  }, [tab]);
 
   // Reset teams if it becomes disallowed
   useEffect(() => {
@@ -392,8 +406,9 @@ export default function LobbyPage() {
               </button>
             </motion.div>
           ) : tab === "join" ? (
-            <motion.div key="join" initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }}>
-              <form onSubmit={join} className="flex flex-col gap-4">
+            <motion.div key="join" initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }} className="flex flex-col gap-4">
+              {/* Code input */}
+              <form onSubmit={join} className="flex flex-col gap-3">
                 <div>
                   <label className="block text-gray-400 text-xs font-semibold uppercase tracking-widest mb-2">
                     Room Code
@@ -404,7 +419,6 @@ export default function LobbyPage() {
                     value={joinCode}
                     onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, ""))}
                     maxLength={6}
-                    required
                     autoComplete="off"
                     className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-gray-600 text-center text-2xl tracking-[0.4em] font-mono focus:outline-none focus:border-yellow-400 transition-colors"
                   />
@@ -417,6 +431,55 @@ export default function LobbyPage() {
                   {loading ? "Joining…" : "Join Room →"}
                 </button>
               </form>
+
+              {/* Waiting games list */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-gray-500 text-xs font-semibold uppercase tracking-widest">Open Lobbies</span>
+                  <button
+                    onClick={() => {
+                      setGamesLoading(true);
+                      api.listWaitingGames().then((d) => setWaitingGames(d as any)).catch(() => setWaitingGames([])).finally(() => setGamesLoading(false));
+                    }}
+                    className="text-gray-600 hover:text-gray-400 text-[10px] transition-colors"
+                  >
+                    ↻ Refresh
+                  </button>
+                </div>
+                {gamesLoading ? (
+                  <p className="text-gray-600 text-xs text-center py-3">Loading…</p>
+                ) : waitingGames.length === 0 ? (
+                  <p className="text-gray-700 text-xs text-center py-3">No open lobbies right now</p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {waitingGames.map((g) => (
+                      <button
+                        key={g.code}
+                        onClick={() => setJoinCode(g.code)}
+                        className={`w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all ${
+                          joinCode === g.code
+                            ? "bg-emerald-500/15 border-emerald-500/50"
+                            : "bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20"
+                        }`}
+                      >
+                        <span className="font-mono text-yellow-400 font-bold text-sm tracking-wider shrink-0">{g.code}</span>
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <span className="text-white text-xs font-semibold truncate">{g.host}'s game</span>
+                          <span className="text-gray-500 text-[10px]">
+                            {g.joined}/{g.expected_players} players · {g.teams_enabled ? "Teams" : "Solo"}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-0.5 max-w-[80px] justify-end shrink-0">
+                          {g.players.slice(0, 4).map((p) => (
+                            <span key={p} className="text-[9px] text-gray-500 bg-white/5 rounded px-1">{p}</span>
+                          ))}
+                          {g.players.length > 4 && <span className="text-[9px] text-gray-600">+{g.players.length - 4}</span>}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </motion.div>
           ) : (
             /* ── Resume from export ──────────────────────────────────────── */

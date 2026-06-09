@@ -1242,33 +1242,23 @@ export default function GameBoard({
         )}
       </AnimatePresence>
 
-      {/* ── @mention fullscreen callout ─────────────────────────────────────────── */}
+      {/* ── @mention toast (non-blocking, tap to dismiss) ───────────────────────── */}
       <AnimatePresence>
         {mention && (
           <motion.div
-            key="mention-overlay"
-            initial={{ opacity: 0, scale: 1.08 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.18 }}
-            className="pointer-events-none fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+            key="mention-toast"
+            initial={{ y: -50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -50, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 400, damping: 30 }}
+            onClick={() => {/* auto-clears via useGameSocket timeout */}}
+            className="fixed top-14 left-1/2 -translate-x-1/2 z-[80] flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-yellow-400/15 border border-yellow-400/50 shadow-xl backdrop-blur-sm max-w-[300px]"
           >
-            <motion.div
-              initial={{ y: -24, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 12, opacity: 0 }}
-              transition={{ duration: 0.22 }}
-              className="flex flex-col items-center gap-2 px-8 py-6 rounded-2xl bg-yellow-400/10 border border-yellow-400/40"
-            >
-              <span className="text-4xl">📣</span>
-              <span className="text-yellow-300 font-extrabold text-xl tracking-wide">@{username}</span>
-              <span className="text-white/70 text-sm text-center max-w-[240px] leading-snug">
-                <span className="text-yellow-400 font-semibold">{mention.from}</span> called you out
-              </span>
-              <span className="text-white/90 text-sm text-center max-w-[260px] italic leading-snug">
-                "{mention.message.replace(new RegExp(`@${username}`, "gi"), `@${username}`)}"
-              </span>
-            </motion.div>
+            <span className="text-xl shrink-0">📣</span>
+            <div className="flex flex-col min-w-0">
+              <span className="text-yellow-300 font-bold text-xs"><span className="text-white">{mention.from}</span> tagged you</span>
+              <span className="text-white/70 text-[11px] truncate italic">"{mention.message}"</span>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
