@@ -207,17 +207,24 @@ export default function WaitingRoom({ state, username, gameCode, onStartGame, on
           })}
         </div>
 
-        {/* Settings strip */}
-        <div className="mt-4 pt-3 border-t border-white/5 flex flex-wrap gap-2 justify-center text-[11px] text-gray-500">
-          <span className="bg-black/30 rounded-md px-2 py-1 border border-white/5">
-            {state.num_decks === 1 ? "1 Deck" : "2 Decks"}
-          </span>
-          <span className="bg-black/30 rounded-md px-2 py-1 border border-white/5">
-            {Math.floor((52 * state.num_decks) / expected)} max rounds
-          </span>
+        {/* Deck banner — big and eye-catching */}
+        <div className={`mt-4 rounded-xl px-4 py-3 flex items-center justify-between border ${
+          state.num_decks === 2
+            ? "bg-purple-500/15 border-purple-400/40"
+            : "bg-yellow-400/10 border-yellow-400/30"
+        }`}>
+          <div className="flex items-center gap-2.5">
+            <span className="text-2xl">{state.num_decks === 2 ? "🃏🃏" : "🃏"}</span>
+            <div>
+              <p className={`font-extrabold text-base leading-tight ${state.num_decks === 2 ? "text-purple-300" : "text-yellow-300"}`}>
+                {state.num_decks === 2 ? "Double Deck" : "Single Deck"}
+              </p>
+              <p className="text-gray-500 text-[11px]">{state.num_decks === 2 ? "104 cards" : "52 cards"} · {Math.floor((52 * state.num_decks) / expected)} max rounds</p>
+            </div>
+          </div>
           {state.teams_enabled && (
-            <span className="bg-emerald-500/15 text-emerald-400 rounded-md px-2 py-1 border border-emerald-500/25">
-              🤝 Teams on
+            <span className="bg-emerald-500/15 text-emerald-300 font-bold text-xs rounded-lg px-3 py-1.5 border border-emerald-500/30">
+              🤝 Teams
             </span>
           )}
         </div>
