@@ -41,6 +41,7 @@ class Game(models.Model):
     lead_player_index    = models.PositiveSmallIntegerField(default=0)
     # Stored when importing a saved snapshot; consumed (cleared) when host starts
     resume_snapshot = models.JSONField(null=True, blank=True, default=None)
+    declared        = models.BooleanField(default=False)  # game ended by mathematical certainty
     created_at     = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

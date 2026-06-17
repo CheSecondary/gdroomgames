@@ -59,6 +59,7 @@ export interface GameState {
   players: PlayerState[];
   current_trick: TrickCard[];
   is_resume?: boolean;   // true while resume_snapshot is pending (cleared after host starts)
+  declared?: boolean;    // game ended early by mathematical certainty
 }
 
 export interface RoundScore {

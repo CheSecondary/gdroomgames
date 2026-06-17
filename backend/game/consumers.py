@@ -356,7 +356,11 @@ class GameConsumer(AsyncWebsocketConsumer):
             return
         old_username = player.username
         seat = player.seat
+        game = await self.get_game()
         await self.db_rename_player(player, requester)
+        # Transfer host role if the handed-off player was host
+        if game.host_username == old_username:
+            await self.db_update_game(game, host_username=requester)
         await self.channel_layer.group_send(
             self.room_group,
             {
@@ -539,6 +543,24 @@ class GameConsumer(AsyncWebsocketConsumer):
         else:
             await self.end_round(game, fresh)
 
+    def _is_declared(self, game, players_after_scores):
+        """Teams only: declared if leading team's gap exceeds max possible catchup from remaining rounds."""
+        if not game.teams_enabled or not game.teams:
+            return False
+        rounds_left = game.max_rounds - game.current_round
+        if rounds_left <= 0:
+            return False
+        # Max a trailing team could ever earn: bid every trick in every remaining round
+        max_catchup = sum(r * 10 for r in range(game.current_round + 1, game.max_rounds + 1))
+        team_scores = []
+        for team_seats in game.teams:
+            score = next((p.total_score for p in players_after_scores if p.seat == team_seats[0]), 0)
+            team_scores.append(score)
+        if len(team_scores) < 2:
+            return False
+        team_scores.sort(reverse=True)
+        return (team_scores[0] - team_scores[1]) > max_catchup
+
     async def end_round(self, game, players):
         players_data = [{"seat": p.seat, "bid": p.bid, "tricks_won": p.tricks_won} for p in players]
 
@@ -567,6 +589,15 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.db_complete_current_round(game)
 
         game = await self.get_game()
+        fresh_players = await self.get_players(game)
+
+        # Declared: outcome mathematically certain, end early
+        if self._is_declared(game, fresh_players):
+            await self.db_update_game(game, status=Game.STATUS_FINISHED, declared=True)
+            await self.trigger_export(game.code)
+            await self.broadcast_state()
+            return
+
         if game.current_round >= game.max_rounds:
             actual_max = engine.max_rounds(len(players), game.num_decks)
             if game.max_rounds < actual_max:
@@ -815,6 +846,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             "players":        players_state,
             "current_trick":  trick_cards,
             "spectators":     spectators_state,
+            "declared":       game.declared,
         }
 
     # ── DB helpers ────────────────────────────────────────────────────────────

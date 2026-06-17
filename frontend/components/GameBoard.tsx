@@ -774,6 +774,7 @@ export default function GameBoard({
             teams={state.teams}
             isHost={state.host_username === username}
             roundHistory={roundHistory}
+            declared={state.declared}
             onNewGame={() => { window.location.href = "/lobby"; }}
             onRematch={onRematch}
           />
@@ -1557,6 +1558,7 @@ function GameOverBanner({
   teams,
   isHost,
   roundHistory,
+  declared,
   onNewGame,
   onRematch,
 }: {
@@ -1565,6 +1567,7 @@ function GameOverBanner({
   teams: number[][];
   isHost: boolean;
   roundHistory: { round: number; scores: RoundScore[] }[];
+  declared?: boolean;
   onNewGame: () => void;
   onRematch: () => void;
 }) {
@@ -1587,6 +1590,12 @@ function GameOverBanner({
         className="text-center bg-black/60 border border-yellow-500/30 rounded-2xl px-6 py-5 shadow-2xl max-w-sm w-full"
       >
         <p className="text-4xl mb-2">🏆</p>
+        {declared && (
+          <div className="mb-3 px-4 py-2 rounded-xl bg-orange-500/20 border border-orange-400/50">
+            <p className="text-orange-300 text-sm font-extrabold uppercase tracking-widest">🏳️ Declared — Game Over</p>
+            <p className="text-orange-400/70 text-[11px] mt-0.5">Result was mathematically certain</p>
+          </div>
+        )}
         <p className={`text-xl font-bold ${color.text}`}>Team {winner.ti + 1} wins!</p>
         <p className="text-gray-400 text-xs mt-0.5 mb-4">
           {winner.members.map((p) => p.username).join(" & ")} · {winner.score > 0 ? `+${winner.score}` : winner.score} pts
@@ -1631,6 +1640,7 @@ function GameOverBanner({
       className="text-center bg-black/60 border border-yellow-500/30 rounded-2xl px-6 py-5 shadow-2xl max-w-sm w-full"
     >
       <p className="text-4xl mb-2">🏆</p>
+      {declared && <p className="text-orange-400 text-[11px] font-bold uppercase tracking-widest mb-1">Declared ✦ Game Over</p>}
       <p className="text-yellow-400 text-xl font-bold">{winner.username} wins!</p>
       <p className="text-gray-500 text-xs mt-0.5 mb-4">{winner.total_score} points</p>
       <div className="space-y-1.5 mb-5">

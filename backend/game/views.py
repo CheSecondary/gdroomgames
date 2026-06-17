@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
-from .models import Game, Player
+from .models import Game, Player, BidLog, TrickCard
 from .serializers import GameSerializer
 
 
@@ -272,6 +272,52 @@ class ResumeFromExportView(APIView):
             "teams_enabled": snap["teams_enabled"],
             "players":       players,
         }, status=status.HTTP_201_CREATED)
+
+
+class RoundHistoryView(APIView):
+    """Return per-round bid+tricks_won for every player in a game, built from DB records."""
+    permission_classes = [AllowAny]
+
+    def get(self, request, code):
+        try:
+            game = Game.objects.get(code=code.upper())
+        except Game.DoesNotExist:
+            return Response({"error": "Game not found."}, status=404)
+
+        # Bids per round per seat from BidLog
+        bids = {}  # {round_number: {seat: bid}}
+        for bl in BidLog.objects.filter(game=game).order_by("round_number", "seat"):
+            bids.setdefault(bl.round_number, {})[bl.seat] = bl.bid_made
+
+        # tricks_won per round per seat — take the last TrickCard of each round
+        # which has the final all_tricks_snapshot for that round
+        tricks = {}  # {round_number: {seat: tricks_won}}
+        for tc in TrickCard.objects.filter(trick__round__game=game).select_related("trick__round").order_by("trick__round__number", "trick__number", "id"):
+            rnum = tc.trick.round.number
+            if tc.all_tricks_snapshot:
+                tricks[rnum] = {int(k): v for k, v in tc.all_tricks_snapshot.items()}
+
+        # Build username map: seat → username
+        seat_to_user = {p.seat: p.username for p in game.players.all()}
+
+        rounds = []
+        for rnum in sorted(set(list(bids.keys()) + list(tricks.keys()))):
+            scores = []
+            round_bids   = bids.get(rnum, {})
+            round_tricks = tricks.get(rnum, {})
+            for seat, username in seat_to_user.items():
+                bid = round_bids.get(seat, -1)
+                won = round_tricks.get(seat, 0)
+                scores.append({
+                    "username": username,
+                    "bid": bid,
+                    "tricks_won": won,
+                    "delta": 0,       # not needed for badge
+                    "team_index": -1,
+                })
+            rounds.append({"round": rnum, "scores": scores})
+
+        return Response(rounds)
 
 
 class ListWaitingGamesView(APIView):

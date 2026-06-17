@@ -36,4 +36,6 @@ export const api = {
     }),
 
   listWaitingGames: () => req("/api/game/lobby/"),
+
+  getRoundHistory: (code: string) => req(`/api/game/${code}/history/`),
 };

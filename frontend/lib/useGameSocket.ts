@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { GameState, Card, RoundScore } from "./types";
+import { api } from "./api";
 
 const WS_BASE = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000";
 
@@ -75,7 +76,15 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
       socket.onmessage = (e) => {
         const msg = JSON.parse(e.data);
         if (msg.type === "state") {
-          setState(msg);
+          setState((prev) => {
+            // When game finishes, fetch authoritative round history from DB
+            if (msg.status === "finished" && prev?.status !== "finished") {
+              api.getRoundHistory(gameCode).then((data: any) => {
+                setRoundHistory(data);
+              }).catch(() => {});
+            }
+            return msg;
+          });
           if (msg.current_trick && msg.current_trick.length === 0) {
             setTrickWinner(null);
           }
