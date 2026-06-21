@@ -30,6 +30,7 @@ interface Props {
   onBid: (bid: number) => void;
   onPlayCard: (card: CardType) => void;
   onEndGame: () => void;
+  onKickSpectator: (username: string) => void;
   onExtendGame: () => void;
   onFinishGame: () => void;
   // Spectator/peek mode
@@ -81,6 +82,7 @@ export default function GameBoard({
   onBid,
   onPlayCard,
   onEndGame,
+  onKickSpectator,
   onExtendGame,
   onFinishGame,
   isSpectator = false,
@@ -101,8 +103,9 @@ export default function GameBoard({
 }: Props) {
   const [ownershipToast, setOwnershipToast] = useState<string | null>(null);
   const [selectedCard,   setSelectedCard]   = useState<string | null>(null);
-  const [showEndConfirm, setShowEndConfirm] = useState(false);
-  const [showMenu,       setShowMenu]       = useState(false);
+  const [showEndConfirm,    setShowEndConfirm]    = useState(false);
+  const [showMenu,          setShowMenu]          = useState(false);
+  const [showSpectators,    setShowSpectators]    = useState(false);
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [showVoice,      setShowVoice]      = useState(false);
   const [voiceIsLive,    setVoiceIsLive]    = useState(false);
@@ -370,6 +373,24 @@ export default function GameBoard({
             SFX
           </button>
 
+          {/* Spectators eye — desktop only */}
+          {state.spectators.filter(s => s.is_connected).length > 0 && (
+            <button
+              onClick={() => setShowSpectators(v => !v)}
+              title="Spectators"
+              className={`relative hidden md:inline-flex p-1.5 rounded-lg border text-sm leading-none transition-all ${
+                showSpectators
+                  ? "bg-yellow-400/20 border-yellow-400/50 text-yellow-300"
+                  : "bg-white/5 border-white/10 text-gray-400 hover:text-yellow-400"
+              }`}
+            >
+              👁️
+              <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-yellow-500 rounded-full text-[8px] font-bold text-gray-900 flex items-center justify-center">
+                {state.spectators.filter(s => s.is_connected).length}
+              </span>
+            </button>
+          )}
+
           {/* Chat — always visible, most used */}
           <button
             onClick={toggleChat}
@@ -423,6 +444,49 @@ export default function GameBoard({
         </div>
       </header>
 
+      {/* ── Spectator panel ──────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showSpectators && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="overflow-hidden bg-black/75 border-b border-white/5 shrink-0 z-20"
+          >
+            <div className="px-3 py-2.5">
+              <p className="text-gray-500 text-[10px] uppercase tracking-widest mb-2">Watching this game</p>
+              {state.spectators.filter(s => s.is_connected).length === 0 ? (
+                <p className="text-gray-600 text-xs">No spectators</p>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {state.spectators.filter(s => s.is_connected).map(s => (
+                    <div key={s.username} className="flex items-center justify-between">
+                      <span className="text-gray-300 text-xs">
+                        👁️ <span className="font-semibold">{s.username}</span>
+                        {s.target_seat !== null && (
+                          <span className="text-gray-500 ml-1">
+                            → {state.players.find(p => p.seat === s.target_seat)?.username ?? `#${(s.target_seat ?? 0) + 1}`}
+                          </span>
+                        )}
+                      </span>
+                      {isHost && (
+                        <button
+                          onClick={() => onKickSpectator(s.username)}
+                          className="text-[10px] text-red-400/70 hover:text-red-400 border border-red-400/20 px-2 py-0.5 rounded transition-all"
+                        >
+                          Kick
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Hamburger menu (mobile) ──────────────────────────────────────────── */}
       <AnimatePresence>
         {showMenu && (
@@ -467,6 +531,33 @@ export default function GameBoard({
                 </button>
               )}
             </div>
+            {state.spectators.filter(s => s.is_connected).length > 0 && (
+              <div className="px-3 pb-2.5 border-t border-white/5 pt-2">
+                <p className="text-gray-600 text-[10px] uppercase tracking-widest mb-1.5">
+                  👁️ Spectators ({state.spectators.filter(s => s.is_connected).length})
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  {state.spectators.filter(s => s.is_connected).map(s => (
+                    <div key={s.username} className="flex items-center justify-between">
+                      <span className="text-gray-300 text-xs">
+                        {s.username}
+                        {s.target_seat !== null && (
+                          <span className="text-gray-500 ml-1">→ {state.players.find(p => p.seat === s.target_seat)?.username ?? `#${(s.target_seat ?? 0) + 1}`}</span>
+                        )}
+                      </span>
+                      {isHost && (
+                        <button
+                          onClick={() => { onKickSpectator(s.username); setShowMenu(false); }}
+                          className="text-[10px] text-red-400/70 hover:text-red-400 border border-red-400/20 px-2 py-0.5 rounded"
+                        >
+                          Kick
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

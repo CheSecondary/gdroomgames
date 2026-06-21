@@ -141,7 +141,9 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
             setReactions((prev) => prev.filter((x) => x.id !== r.id));
           }, 2500);
         } else if (msg.type === "rematch_invite") {
-          setRematchInvite({ code: msg.new_code, host: msg.host });
+          if (spectateSeat === undefined) {
+            setRematchInvite({ code: msg.new_code, host: msg.host });
+          }
         } else if (msg.type === "peek_requested") {
           setPeekRequest({ spectator: msg.spectator, targetSeat: msg.target_seat });
         } else if (msg.type === "peek_response") {
@@ -160,6 +162,10 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
           if (msg.to_username === username) {
             setTakeoverStatus("idle"); // accepted — now a normal player
             setTakeoverRequest(null);
+          }
+        } else if (msg.type === "spectator_kicked") {
+          if (msg.username === username) {
+            window.location.href = "/lobby";
           }
         } else if (msg.type === "player_kicked") {
           if (msg.username === username) {
@@ -205,7 +211,8 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
     ...(overrides?.scoreOverride    && { score_override: overrides.scoreOverride }),
   }), [send]);
   const cancelGame   = useCallback(() => send({ action: "cancel_game" }), [send]);
-  const kickPlayer   = useCallback((targetUsername: string) => send({ action: "kick_player", target_username: targetUsername }), [send]);
+  const kickPlayer       = useCallback((targetUsername: string) => send({ action: "kick_player", target_username: targetUsername }), [send]);
+  const kickSpectator    = useCallback((spectatorUsername: string) => send({ action: "kick_spectator", spectator_username: spectatorUsername }), [send]);
   const placeBid     = useCallback((bid: number) => send({ action: "place_bid", bid }), [send]);
   const playCard     = useCallback((card: Card) => send({ action: "play_card", card }), [send]);
   const endGame      = useCallback(() => send({ action: "end_game" }), [send]);
@@ -263,6 +270,7 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
     startGame,
     cancelGame,
     kickPlayer,
+    kickSpectator,
     placeBid,
     playCard,
     endGame,
