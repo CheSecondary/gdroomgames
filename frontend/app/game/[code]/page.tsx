@@ -36,7 +36,7 @@ export default function GamePage() {
 
   const {
     state, error, connected, roundSummary, roundHistory, trickWinner, clearSummary,
-    startGame, cancelGame, kickPlayer, placeBid, playCard, endGame, chatMessages, sendChat,
+    startGame, cancelGame, kickPlayer, kickSpectator, placeBid, playCard, endGame, chatMessages, sendChat,
     chatToasts, mention, rematchInvite, dismissRematch,
     rematch,
     extendGame, finishGame,
@@ -135,6 +135,7 @@ export default function GamePage() {
       onBid={placeBid}
       onPlayCard={playCard}
       onEndGame={endGame}
+      onKickSpectator={kickSpectator}
       onExtendGame={extendGame}
       onFinishGame={finishGame}
       isSpectator={spectateSeat !== undefined}
