@@ -68,6 +68,13 @@ const VoiceChat = forwardRef<VoiceChatHandle, Props>(function VoiceChat(
     setPhase("joining");
 
     try {
+      // Fetch token from backend (returns null token if no certificate configured)
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      // uid=0 means "any uid" — Agora assigns one at join time
+      const tokenRes = await fetch(`${API_BASE}/api/game/agora-token/?channel=${encodeURIComponent(gameCode)}&uid=0`);
+      const tokenData = tokenRes.ok ? await tokenRes.json() : {};
+      const token = tokenData.token ?? null;
+
       const AgoraRTC = (await import("agora-rtc-sdk-ng")).default;
       AgoraRTC.setLogLevel(3);
 
@@ -103,8 +110,7 @@ const VoiceChat = forwardRef<VoiceChatHandle, Props>(function VoiceChat(
         });
       });
 
-      // Use username as string UID so chips can match by name
-      await client.join(appId, gameCode, null, username);
+      await client.join(appId, gameCode, token, null);
 
       const micTrack = await AgoraRTC.createMicrophoneAudioTrack();
       localTrackRef.current = micTrack;

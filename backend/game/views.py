@@ -1,6 +1,8 @@
 import json
+import os
 import random
 import string
+import time
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -356,3 +358,25 @@ class ListWaitingGamesView(APIView):
                 "teams_enabled":    g.teams_enabled,
             })
         return Response(result)
+
+
+class AgoraTokenView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        app_id   = os.environ.get("AGORA_APP_ID", "")
+        app_cert = os.environ.get("AGORA_APP_CERTIFICATE", "")
+        channel  = request.query_params.get("channel", "")
+        uid      = int(request.query_params.get("uid", 0))
+
+        if not app_id or not channel:
+            return Response({"error": "missing params"}, status=400)
+
+        # If no certificate configured, return null token (App ID only mode)
+        if not app_cert:
+            return Response({"token": None, "app_id": app_id})
+
+        from agora_token_builder import RtcTokenBuilder
+        expire = int(time.time()) + 3600  # 1 hour
+        token  = RtcTokenBuilder.buildTokenWithUid(app_id, app_cert, channel, uid, 1, expire)  # 1 = publisher
+        return Response({"token": token, "app_id": app_id})
