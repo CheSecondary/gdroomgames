@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from .models import Game, Player, BidLog, TrickCard
+from . import engine
 from .serializers import GameSerializer
 
 
@@ -297,23 +298,40 @@ class RoundHistoryView(APIView):
             if tc.all_tricks_snapshot:
                 tricks[rnum] = {int(k): v for k, v in tc.all_tricks_snapshot.items()}
 
-        # Build username map: seat → username
-        seat_to_user = {p.seat: p.username for p in game.players.all()}
+        # Build player map: seat → (username, team_index)
+        players_qs = list(game.players.all())
+        seat_to_user = {p.seat: p.username for p in players_qs}
+        teams = game.teams or []
+        seat_to_team = {}
+        for ti, team_seats in enumerate(teams):
+            for s in team_seats:
+                seat_to_team[s] = ti
 
         rounds = []
         for rnum in sorted(set(list(bids.keys()) + list(tricks.keys()))):
-            scores = []
             round_bids   = bids.get(rnum, {})
             round_tricks = tricks.get(rnum, {})
-            for seat, username in seat_to_user.items():
-                bid = round_bids.get(seat, -1)
-                won = round_tricks.get(seat, 0)
+
+            # Build players_data for engine scoring
+            players_data = [
+                {"seat": seat, "bid": round_bids.get(seat, 0), "tricks_won": round_tricks.get(seat, 0)}
+                for seat in sorted(seat_to_user.keys())
+            ]
+
+            if game.teams_enabled and teams:
+                deltas = engine.calculate_team_round_scores(teams, players_data)
+            else:
+                deltas = engine.calculate_round_scores(players_data)
+
+            scores = []
+            for i, pd in enumerate(players_data):
+                seat = pd["seat"]
                 scores.append({
-                    "username": username,
-                    "bid": bid,
-                    "tricks_won": won,
-                    "delta": 0,       # not needed for badge
-                    "team_index": -1,
+                    "username":   seat_to_user[seat],
+                    "bid":        round_bids.get(seat, -1),
+                    "tricks_won": round_tricks.get(seat, 0),
+                    "delta":      deltas[i],
+                    "team_index": seat_to_team.get(seat, -1),
                 })
             rounds.append({"round": rnum, "scores": scores})
 

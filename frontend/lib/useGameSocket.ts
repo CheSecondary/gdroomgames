@@ -77,11 +77,17 @@ export function useGameSocket(gameCode: string, username: string, spectateSeat?:
         const msg = JSON.parse(e.data);
         if (msg.type === "state") {
           setState((prev) => {
-            // When game finishes, fetch authoritative round history from DB
+            // Only fetch from DB if we finished without a complete roundHistory
+            // (e.g. player reconnected mid-game and missed round_ended events)
             if (msg.status === "finished" && prev?.status !== "finished") {
-              api.getRoundHistory(gameCode).then((data: any) => {
-                setRoundHistory(data);
-              }).catch(() => {});
+              setRoundHistory((existing) => {
+                if (existing.length < msg.current_round) {
+                  api.getRoundHistory(gameCode).then((data: any) => {
+                    setRoundHistory(data);
+                  }).catch(() => {});
+                }
+                return existing;
+              });
             }
             return msg;
           });
