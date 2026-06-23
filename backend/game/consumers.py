@@ -648,6 +648,11 @@ class GameConsumer(AsyncWebsocketConsumer):
             return False, "That card isn't in your hand."
 
         trick = await self.get_current_trick(game)
+
+        # Guard against double-play (double-click / two simultaneous connections)
+        if trick and await self.db_player_already_played(trick, player):
+            return False, "You already played a card this trick."
+
         if not trick or not trick.lead_suit:
             return True, ""   # first card — anything goes
 
@@ -958,6 +963,10 @@ class GameConsumer(AsyncWebsocketConsumer):
     def db_kick_player(self, game, username):
         deleted, _ = game.players.filter(username=username).delete()
         return deleted > 0
+
+    @database_sync_to_async
+    def db_player_already_played(self, trick, player):
+        return trick.cards.filter(player=player).exists()
 
     @database_sync_to_async
     def db_remove_spectator(self, game, username):

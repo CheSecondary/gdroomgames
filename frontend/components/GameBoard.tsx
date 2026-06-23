@@ -103,6 +103,7 @@ export default function GameBoard({
 }: Props) {
   const [ownershipToast, setOwnershipToast] = useState<string | null>(null);
   const [selectedCard,   setSelectedCard]   = useState<string | null>(null);
+  const playingCardRef = useRef(false); // prevents double-play from rapid clicks
   const [showEndConfirm,    setShowEndConfirm]    = useState(false);
   const [showMenu,          setShowMenu]          = useState(false);
   const [showSpectators,    setShowSpectators]    = useState(false);
@@ -278,9 +279,26 @@ export default function GameBoard({
   const handleCardClick = (card: CardType) => {
     if (!myTurn || state.status !== "playing") return;
     const key = cardKey(card);
-    if (selectedCard === key) { onPlayCard(card); setSelectedCard(null); }
-    else                      { setSelectedCard(key); }
+    if (selectedCard === key) {
+      if (playingCardRef.current) return; // already sent, wait for state update
+      playingCardRef.current = true;
+      onPlayCard(card);
+      setSelectedCard(null);
+      // Safety: release lock after 5s if server never responds
+      setTimeout(() => { playingCardRef.current = false; }, 5000);
+    } else {
+      setSelectedCard(key);
+    }
   };
+
+  // Reset the lock once the server confirms our card was accepted (trick length changes)
+  const prevTrickLenRef = useRef(state.current_trick.length);
+  useEffect(() => {
+    if (state.current_trick.length !== prevTrickLenRef.current) {
+      playingCardRef.current = false;
+      prevTrickLenRef.current = state.current_trick.length;
+    }
+  }, [state.current_trick.length]);
 
   const myHand     = (displayedPlayer?.hand ?? []).filter((c) => !c.hidden);
   const sortedHand = [...myHand].sort(
